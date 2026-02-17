@@ -1,20 +1,25 @@
 const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'walkie-talkie-default-secret-change-me';
+const JWT_SECRET = process.env.JWT_SECRET || 'walkie-default';
 
 function hashPassphrase(text) {
-  return crypto.scryptSync(text.trim(), 'openclaw-walkie-salt', 64).toString('hex');
+  return crypto.createHash('sha256').update(text.trim() + 'openclaw-walkie-salt').digest('hex');
 }
 
 function createToken() {
-  return jwt.sign({ ts: Date.now() }, JWT_SECRET, { expiresIn: '4h' });
+  const payload = JSON.stringify({ ts: Date.now(), exp: Date.now() + 4 * 3600000 });
+  const sig = crypto.createHmac('sha256', JWT_SECRET).update(payload).digest('hex');
+  return Buffer.from(payload).toString('base64') + '.' + sig;
 }
 
 function verifyToken(token) {
   try {
-    jwt.verify(token, JWT_SECRET);
-    return true;
+    const [b64, sig] = token.split('.');
+    const payload = Buffer.from(b64, 'base64').toString();
+    const expected = crypto.createHmac('sha256', JWT_SECRET).update(payload).digest('hex');
+    if (sig !== expected) return false;
+    const { exp } = JSON.parse(payload);
+    return Date.now() < exp;
   } catch { return false; }
 }
 
