@@ -113,12 +113,25 @@ const transcriptLive = $('transcript-live');
 const modeLabel = $('mode-label');
 
 let ttsEnabled = localStorage.getItem('wt_tts') === '1';
+let ttsAudio = null;
 function speak(text) {
-  if (!ttsEnabled || !('speechSynthesis' in window)) return;
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'zh-TW';
-  u.rate = 1.1;
-  speechSynthesis.speak(u);
+  if (!ttsEnabled) return;
+  playTTS(text);
+}
+async function playTTS(text) {
+  if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+  try {
+    const r = await fetch(API + '/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    if (!r.ok) return;
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    ttsAudio = new Audio(url);
+    ttsAudio.play();
+  } catch {}
 }
 
 function isSessionValid() {
@@ -308,7 +321,7 @@ function addMessage(text, type) {
     const btn = document.createElement('button');
     btn.className = 'play-btn';
     btn.textContent = '▶';
-    btn.onclick = () => { const u = new SpeechSynthesisUtterance(text); u.lang = 'zh-TW'; u.rate = 1.1; speechSynthesis.speak(u); };
+    btn.onclick = () => playTTS(text);
     div.appendChild(btn);
   }
   messages.appendChild(div);
