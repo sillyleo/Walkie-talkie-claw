@@ -308,7 +308,7 @@ function addMessage(text, type) {
     const btn = document.createElement('button');
     btn.className = 'play-btn';
     btn.textContent = '▶';
-    btn.onclick = () => speak(text);
+    btn.onclick = () => { const u = new SpeechSynthesisUtterance(text); u.lang = 'zh-TW'; u.rate = 1.1; speechSynthesis.speak(u); };
     div.appendChild(btn);
   }
   messages.appendChild(div);
