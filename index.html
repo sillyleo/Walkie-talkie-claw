@@ -196,6 +196,9 @@ $('btn-yes').onclick = async () => {
     token = res.token;
     localStorage.setItem('wt_token', token);
     localStorage.setItem('wt_token_time', '' + Date.now());
+    if (res.hash) {
+      localStorage.setItem('wt_setup_hash', res.hash);
+    }
     speak('設定完成');
     enterChat();
   } else {

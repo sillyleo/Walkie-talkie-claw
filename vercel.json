@@ -1,5 +1,5 @@
 {
-  "rewrites": [
-    { "source": "/api/:path*", "destination": "http://64.176.48.181:3847/api/:path*" }
-  ]
+  "functions": {
+    "api/**/*.js": { "runtime": "@vercel/node@3" }
+  }
 }
