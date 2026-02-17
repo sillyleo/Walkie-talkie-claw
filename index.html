@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<meta name="theme-color" content="#111111">
+<link rel="manifest" href="manifest.json">
+<title>對講機</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#111;color:#eee;height:100dvh;display:flex;flex-direction:column;overflow:hidden;-webkit-user-select:none;user-select:none}
+.status-bar{padding:12px 16px;text-align:center;font-size:1.1em;font-weight:600;letter-spacing:2px}
+.status-locked{background:#222;color:#888}
+.status-chat{background:#3a1111;color:#ff4444}
+.status-command{background:#113a11;color:#44ff44}
+
+/* Lock screen */
+#lock-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:24px}
+#lock-screen .icon{font-size:4em}
+#lock-screen .hint{color:#888;font-size:0.95em;text-align:center;max-width:280px;line-height:1.6}
+#lock-screen .transcript{color:#fff;font-size:1.2em;min-height:2em;text-align:center}
+#lock-screen .confirm-row{display:flex;gap:12px}
+#lock-screen .confirm-row button{padding:10px 28px;border:none;border-radius:12px;font-size:1em;cursor:pointer}
+.btn-confirm{background:#44ff44;color:#111}
+.btn-cancel{background:#333;color:#eee}
+
+/* Chat screen */
+#chat-screen{flex:1;display:none;flex-direction:column}
+#messages{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:85%;padding:10px 14px;border-radius:16px;font-size:0.95em;line-height:1.5;word-break:break-word}
+.msg-user{align-self:flex-end;background:#2a2a4a;border-bottom-right-radius:4px}
+.msg-bot{align-self:flex-start;background:#2a2a2a;border-bottom-left-radius:4px}
+.msg-bot .play-btn{background:none;border:none;color:#888;cursor:pointer;font-size:1.1em;margin-left:6px}
+.msg-bot .play-btn:hover{color:#fff}
+
+/* PTT area */
+#ptt-area{padding:20px;display:flex;flex-direction:column;align-items:center;gap:10px;background:#0a0a0a}
+#transcript-live{color:#888;font-size:0.85em;min-height:1.2em;text-align:center}
+#ptt-btn{width:100px;height:100px;border-radius:50%;border:4px solid #333;background:#222;font-size:2.2em;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;touch-action:none}
+#ptt-btn:active,#ptt-btn.active{transform:scale(1.12);border-color:#ff4444;background:#331111}
+#ptt-btn.active{animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,68,68,0.4)}50%{box-shadow:0 0 0 20px rgba(255,68,68,0)}}
+#ptt-btn.command-mode{border-color:#44ff44}
+#ptt-btn.command-mode.active{border-color:#44ff44;background:#113311;animation-name:pulse-green}
+@keyframes pulse-green{0%,100%{box-shadow:0 0 0 0 rgba(68,255,68,0.4)}50%{box-shadow:0 0 0 20px rgba(68,255,68,0)}}
+#mode-label{font-size:0.8em;color:#666}
+
+/* Loading */
+.typing{color:#666;font-style:italic}
+</style>
+</head>
+<body>
+
+<div class="status-bar status-locked" id="status-bar">🔒 已鎖定</div>
+
+<div id="lock-screen">
+  <div class="icon">🎙️</div>
+  <div class="hint" id="lock-hint">載入中...</div>
+  <div class="transcript" id="lock-transcript"></div>
+  <div class="confirm-row" id="confirm-row" style="display:none">
+    <button class="btn-confirm" id="btn-yes">✓ 確認</button>
+    <button class="btn-cancel" id="btn-no">✗ 重來</button>
+  </div>
+</div>
+
+<div id="chat-screen">
+  <div id="messages"></div>
+  <div id="ptt-area">
+    <div id="transcript-live">&nbsp;</div>
+    <button id="ptt-btn">🎤</button>
+    <div id="mode-label">🔴 聊天模式</div>
+  </div>
+</div>
+
+<script>
+const API = location.origin;
+let token = localStorage.getItem('wt_token');
+let tokenTime = parseInt(localStorage.getItem('wt_token_time') || '0');
+let isSetup = false;
+let commandMode = false;
+let commandTimer = null;
+let passphraseHash = null; // we don't store this client-side, server checks
+let recognition = null;
+let isRecording = false;
+let pendingPassphrase = null;
+
+const $ = id => document.getElementById(id);
+const statusBar = $('status-bar');
+const lockScreen = $('lock-screen');
+const chatScreen = $('chat-screen');
+const lockHint = $('lock-hint');
+const lockTranscript = $('lock-transcript');
+const confirmRow = $('confirm-row');
+const messages = $('messages');
+const pttBtn = $('ptt-btn');
+const transcriptLive = $('transcript-live');
+const modeLabel = $('mode-label');
+
+// TTS via browser
+function speak(text) {
+  if (!('speechSynthesis' in window)) return;
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'zh-TW';
+  u.rate = 1.1;
+  speechSynthesis.speak(u);
+}
+
+// Speech recognition
+function createRecognition(onResult, onEnd) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { alert('此瀏覽器不支援語音辨識'); return null; }
+  const r = new SR();
+  r.lang = 'zh-TW';
+  r.interimResults = true;
+  r.continuous = false;
+  let finalText = '';
+  let interimText = '';
+  r.onresult = e => {
+    finalText = '';
+    interimText = '';
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+      else interimText += e.results[i][0].transcript;
+    }
+    onResult(finalText || interimText, !!finalText);
+  };
+  r.onend = () => onEnd(finalText);
+  r.onerror = () => onEnd(finalText);
+  return r;
+}
+
+// Check session validity
+function isSessionValid() {
+  return token && (Date.now() - tokenTime < 4 * 60 * 60 * 1000);
+}
+
+// API helpers
+async function api(path, body) {
+  const r = await fetch(API + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return r.json();
+}
+
+// --- LOCK SCREEN ---
+async function initLock() {
+  if (isSessionValid()) { enterChat(); return; }
+  token = null;
+  localStorage.removeItem('wt_token');
+
+  const { hasPassphrase } = await (await fetch(API + '/api/status')).json();
+  isSetup = !hasPassphrase;
+
+  if (isSetup) {
+    lockHint.textContent = '首次使用，請設定你的通關密語。\n長按下方按鈕說出密語。';
+    speak('請說出你的通關密語');
+  } else {
+    lockHint.textContent = '長按按鈕說出通關密語以解鎖。';
+    speak('請說出通關密語');
+  }
+
+  // Add a PTT button for lock screen
+  if (!$('lock-ptt')) {
+    const btn = document.createElement('button');
+    btn.id = 'lock-ptt';
+    btn.textContent = '🎤';
+    btn.style.cssText = 'width:80px;height:80px;border-radius:50%;border:3px solid #333;background:#222;font-size:1.8em;cursor:pointer;touch-action:none;-webkit-tap-highlight-color:transparent';
+    lockScreen.insertBefore(btn, confirmRow);
+    setupPTT(btn, onLockResult, onLockEnd);
+  }
+}
+
+function onLockResult(text) {
+  lockTranscript.textContent = text;
+}
+
+function onLockEnd(text) {
+  if (!text) return;
+  if (isSetup) {
+    pendingPassphrase = text;
+    lockHint.textContent = `你的密語是「${text}」嗎？`;
+    confirmRow.style.display = 'flex';
+  } else {
+    tryUnlock(text);
+  }
+}
+
+$('btn-yes').onclick = async () => {
+  if (!pendingPassphrase) return;
+  confirmRow.style.display = 'none';
+  lockHint.textContent = '設定中...';
+  const res = await api('/api/setup-passphrase', { passphrase: pendingPassphrase });
+  if (res.ok) {
+    token = res.token;
+    localStorage.setItem('wt_token', token);
+    localStorage.setItem('wt_token_time', '' + Date.now());
+    speak('設定完成');
+    enterChat();
+  } else {
+    lockHint.textContent = res.error || '設定失敗';
+    speak(res.error || '設定失敗');
+  }
+  pendingPassphrase = null;
+};
+
+$('btn-no').onclick = () => {
+  pendingPassphrase = null;
+  confirmRow.style.display = 'none';
+  lockTranscript.textContent = '';
+  lockHint.textContent = '再試一次，長按按鈕說出密語。';
+};
+
+async function tryUnlock(text) {
+  lockHint.textContent = '驗證中...';
+  const res = await api('/api/unlock', { passphrase: text });
+  if (res.ok) {
+    token = res.token;
+    localStorage.setItem('wt_token', token);
+    localStorage.setItem('wt_token_time', '' + Date.now());
+    speak('解鎖成功');
+    enterChat();
+  } else {
+    lockHint.textContent = '密語錯誤，再試一次。';
+    lockTranscript.textContent = '';
+    speak('密語錯誤');
+  }
+}
+
+// --- CHAT SCREEN ---
+function enterChat() {
+  lockScreen.style.display = 'none';
+  chatScreen.style.display = 'flex';
+  setMode(false);
+  setupPTT(pttBtn, onChatResult, onChatEnd);
+}
+
+function setMode(cmd) {
+  commandMode = cmd;
+  if (cmd) {
+    statusBar.className = 'status-bar status-command';
+    statusBar.textContent = '🟢 指令模式';
+    modeLabel.textContent = '🟢 指令模式';
+    pttBtn.classList.add('command-mode');
+    clearTimeout(commandTimer);
+    commandTimer = setTimeout(() => setMode(false), 30000);
+  } else {
+    statusBar.className = 'status-bar status-chat';
+    statusBar.textContent = '🔴 聊天模式';
+    modeLabel.textContent = '🔴 聊天模式';
+    pttBtn.classList.remove('command-mode');
+  }
+}
+
+function onChatResult(text) {
+  transcriptLive.textContent = text || '';
+}
+
+async function onChatEnd(text) {
+  transcriptLive.textContent = '';
+  if (!text) return;
+
+  // Check if passphrase spoken → activate command mode
+  // We send to server to check, but also just switch mode
+  // Simple heuristic: if text contains certain trigger words
+  // Actually, command mode activates when passphrase is said.
+  // We'll try unlock endpoint to check if it matches passphrase
+  const checkRes = await api('/api/unlock', { passphrase: text });
+  if (checkRes.ok) {
+    // It's the passphrase! Switch to command mode
+    setMode(true);
+    addMessage('（已切換至指令模式 - 30秒）', 'bot');
+    speak('指令模式已啟動');
+    return;
+  }
+
+  addMessage(text, 'user');
+  const typing = addMessage('...', 'bot typing');
+
+  const res = await api('/api/chat', { text, mode: commandMode ? 'command' : 'chat', token });
+  if (res.error === '請重新解鎖') {
+    token = null;
+    localStorage.removeItem('wt_token');
+    location.reload();
+    return;
+  }
+
+  typing.remove();
+  const reply = res.reply || res.error || '（無回應）';
+  addMessage(reply, 'bot');
+  speak(reply);
+}
+
+function addMessage(text, type) {
+  const div = document.createElement('div');
+  div.className = 'msg msg-' + type.split(' ')[0];
+  if (type.includes('typing')) div.classList.add('typing');
+  div.textContent = text;
+  if (type === 'bot') {
+    const btn = document.createElement('button');
+    btn.className = 'play-btn';
+    btn.textContent = '🔊';
+    btn.onclick = () => speak(text);
+    div.appendChild(btn);
+  }
+  messages.appendChild(div);
+  messages.scrollTop = messages.scrollHeight;
+  return div;
+}
+
+// --- PTT SETUP ---
+function setupPTT(btn, onResult, onEnd) {
+  let rec = null;
+  let finalText = '';
+
+  function start(e) {
+    e.preventDefault();
+    if (isRecording) return;
+    isRecording = true;
+    finalText = '';
+    btn.classList.add('active');
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert('不支援語音辨識'); return; }
+    rec = new SR();
+    rec.lang = 'zh-TW';
+    rec.interimResults = true;
+    rec.continuous = true;
+    rec.onresult = e2 => {
+      let f = '', interim = '';
+      for (let i = 0; i < e2.results.length; i++) {
+        if (e2.results[i].isFinal) f += e2.results[i][0].transcript;
+        else interim += e2.results[i][0].transcript;
+      }
+      finalText = f;
+      onResult(f || interim);
+    };
+    rec.onerror = () => {};
+    rec.onend = () => {
+      if (isRecording) stop(); // auto-ended
+    };
+    rec.start();
+  }
+
+  function stop(e) {
+    if (e) e.preventDefault();
+    if (!isRecording) return;
+    isRecording = false;
+    btn.classList.remove('active');
+    if (rec) { try { rec.stop(); } catch {} }
+    onEnd(finalText);
+  }
+
+  btn.addEventListener('mousedown', start);
+  btn.addEventListener('mouseup', stop);
+  btn.addEventListener('mouseleave', stop);
+  btn.addEventListener('touchstart', start, { passive: false });
+  btn.addEventListener('touchend', stop, { passive: false });
+  btn.addEventListener('touchcancel', stop);
+}
+
+// Init
+initLock();
+</script>
+</body>
+</html>
