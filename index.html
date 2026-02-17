@@ -42,10 +42,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 #lock-screen .title{font-size:1.8em;font-weight:700;color:#fff;letter-spacing:2px}
 #lock-screen .hint{color:#888;font-size:1em;text-align:center;max-width:300px;line-height:1.7}
 #lock-screen .transcript{color:#fff;font-size:1.4em;min-height:1.5em;text-align:center;font-weight:600}
-.confirm-row{display:flex;gap:16px}
-.confirm-row button{padding:14px 36px;border:none;border-radius:14px;font-size:1.1em;font-weight:600;cursor:pointer}
-.btn-confirm{background:#22cc44;color:#fff}
-.btn-cancel{background:#333;color:#aaa}
+.lock-form{display:flex;gap:12px;align-items:center}
+.lock-form input{padding:14px 18px;border:2px solid #333;border-radius:14px;background:#1a1a1a;color:#fff;font-size:1.1em;width:220px;outline:none}
+.lock-form input:focus{border-color:#22cc44}
+.btn-unlock{padding:14px 28px;border:none;border-radius:14px;font-size:1.1em;font-weight:600;cursor:pointer;background:#22cc44;color:#fff}
+.btn-unlock:active{background:#1a9a33}
+.lock-error{color:#f44;font-size:0.95em;min-height:1.4em}
 
 /* Chat screen */
 #chat-screen{flex:1;display:none;flex-direction:column;height:100dvh;overflow:hidden}
@@ -71,12 +73,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 <div id="lock-screen">
   <div class="title">對講機</div>
   <div class="hint" id="lock-hint">載入中...</div>
-  <div class="transcript" id="lock-transcript"></div>
-  <button class="big-btn" id="lock-ptt">按住說話</button>
-  <div class="confirm-row" id="confirm-row" style="display:none">
-    <button class="btn-confirm" id="btn-yes">確認</button>
-    <button class="btn-cancel" id="btn-no">重來</button>
+  <div class="lock-form">
+    <input type="password" id="passphrase-input" placeholder="輸入通關密語" autocomplete="off">
+    <button class="btn-unlock" id="btn-unlock">解鎖</button>
   </div>
+  <div class="lock-error" id="lock-error"></div>
 </div>
 
 <div id="chat-screen">
@@ -84,7 +85,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <div id="ptt-area">
     <div id="transcript-live">&nbsp;</div>
     <button class="big-btn" id="ptt-btn">按住說話</button>
-    <div id="mode-label">聊天模式</div>
+    <!-- mode label removed -->
     <button id="tts-toggle" style="background:none;border:1px solid #333;color:#666;padding:6px 14px;border-radius:8px;font-size:0.8em;cursor:pointer;margin-top:4px" onclick="ttsEnabled=!ttsEnabled;localStorage.setItem('wt_tts',ttsEnabled?'1':'0');this.textContent=ttsEnabled?'🔊 語音開':'🔇 語音關';this.style.color=ttsEnabled?'#4f4':'#666'">🔇 語音關</button>
   </div>
 </div>
@@ -94,23 +95,20 @@ const API = location.origin;
 let token = localStorage.getItem('wt_token');
 let tokenTime = parseInt(localStorage.getItem('wt_token_time') || '0');
 let isSetup = false;
-let commandMode = false;
-let commandTimer = null;
 let isRecording = false;
-let pendingPassphrase = null;
 
 const $ = id => document.getElementById(id);
 const statusBar = $('status-bar');
 const lockScreen = $('lock-screen');
 const chatScreen = $('chat-screen');
 const lockHint = $('lock-hint');
-const lockTranscript = $('lock-transcript');
-const confirmRow = $('confirm-row');
-const lockPtt = $('lock-ptt');
+const lockError = $('lock-error');
+const passphraseInput = $('passphrase-input');
+const btnUnlock = $('btn-unlock');
 const messages = $('messages');
 const pttBtn = $('ptt-btn');
 const transcriptLive = $('transcript-live');
-const modeLabel = $('mode-label');
+// mode label removed
 
 let ttsEnabled = localStorage.getItem('wt_tts') === '1';
 let ttsAudio = null;
@@ -175,76 +173,54 @@ async function initLock() {
   }
 
   if (isSetup) {
-    lockHint.textContent = '首次使用，請設定你的通關密語。\n長按按鈕說出密語。';
-    speak('請說出你的通關密語');
+    lockHint.textContent = '首次使用，請設定通關密語';
+    btnUnlock.textContent = '設定';
   } else {
-    lockHint.textContent = '長按按鈕說出通關密語解鎖';
-    speak('請說出通關密語');
+    lockHint.textContent = '輸入通關密語解鎖';
   }
 
-  setupPTT(lockPtt, onLockResult, onLockEnd);
+  btnUnlock.onclick = submitPassphrase;
+  passphraseInput.addEventListener('keydown', e => { if (e.key === 'Enter') submitPassphrase(); });
 }
 
-function onLockResult(text) {
-  lockTranscript.textContent = text;
-}
-
-function onLockEnd(text) {
+async function submitPassphrase() {
+  const text = passphraseInput.value.trim();
   if (!text) return;
-  if (isSetup) {
-    pendingPassphrase = text;
-    lockHint.textContent = '你的密語是：';
-    lockTranscript.textContent = text;
-    confirmRow.style.display = 'flex';
-  } else {
-    tryUnlock(text);
-  }
-}
+  lockError.textContent = '';
+  btnUnlock.disabled = true;
+  btnUnlock.textContent = '處理中...';
 
-$('btn-yes').onclick = async () => {
-  if (!pendingPassphrase) return;
-  confirmRow.style.display = 'none';
-  lockHint.textContent = '設定中...';
-  setBtnState(lockPtt, 'waiting');
-  const res = await api('/api/setup-passphrase', { passphrase: pendingPassphrase });
-  setBtnState(lockPtt, 'idle');
-  if (res.ok) {
-    token = res.token;
-    localStorage.setItem('wt_token', token);
-    localStorage.setItem('wt_token_time', '' + Date.now());
-    if (res.hash) localStorage.setItem('wt_setup_hash', res.hash);
-    speak('設定完成');
-    enterChat();
-  } else {
-    lockHint.textContent = res.error || '設定失敗';
-    speak(res.error || '設定失敗');
+  try {
+    if (isSetup) {
+      const res = await api('/api/setup-passphrase', { passphrase: text });
+      if (res.ok) {
+        token = res.token;
+        localStorage.setItem('wt_token', token);
+        localStorage.setItem('wt_token_time', '' + Date.now());
+        if (res.hash) localStorage.setItem('wt_setup_hash', res.hash);
+        enterChat();
+      } else {
+        lockError.textContent = res.error || '設定失敗';
+      }
+    } else {
+      const res = await api('/api/unlock', { passphrase: text });
+      if (res.ok) {
+        token = res.token;
+        localStorage.setItem('wt_token', token);
+        localStorage.setItem('wt_token_time', '' + Date.now());
+        enterChat();
+      } else {
+        lockError.textContent = '密語錯誤，再試一次';
+        passphraseInput.value = '';
+        passphraseInput.focus();
+      }
+    }
+  } catch(e) {
+    lockError.textContent = '連線失敗';
   }
-  pendingPassphrase = null;
-};
 
-$('btn-no').onclick = () => {
-  pendingPassphrase = null;
-  confirmRow.style.display = 'none';
-  lockTranscript.textContent = '';
-  lockHint.textContent = '再試一次，長按按鈕說出密語。';
-};
-
-async function tryUnlock(text) {
-  lockHint.textContent = '驗證中...';
-  setBtnState(lockPtt, 'waiting');
-  const res = await api('/api/unlock', { passphrase: text });
-  setBtnState(lockPtt, 'idle');
-  if (res.ok) {
-    token = res.token;
-    localStorage.setItem('wt_token', token);
-    localStorage.setItem('wt_token_time', '' + Date.now());
-    speak('解鎖成功');
-    enterChat();
-  } else {
-    lockHint.textContent = '密語錯誤，再試一次';
-    lockTranscript.textContent = '';
-    speak('密語錯誤');
-  }
+  btnUnlock.disabled = false;
+  btnUnlock.textContent = isSetup ? '設定' : '解鎖';
 }
 
 // --- CHAT SCREEN ---
@@ -252,24 +228,8 @@ function enterChat() {
   lockScreen.style.display = 'none';
   chatScreen.style.display = 'flex';
   statusBar.className = 'status-bar status-chat';
-  statusBar.textContent = '聊天模式';
-  setMode(false);
+  statusBar.textContent = '對講機';
   setupPTT(pttBtn, onChatResult, onChatEnd);
-}
-
-function setMode(cmd) {
-  commandMode = cmd;
-  if (cmd) {
-    statusBar.className = 'status-bar status-command';
-    statusBar.textContent = '指令模式';
-    modeLabel.textContent = '指令模式 (30秒)';
-    clearTimeout(commandTimer);
-    commandTimer = setTimeout(() => setMode(false), 30000);
-  } else {
-    statusBar.className = 'status-bar status-chat';
-    statusBar.textContent = '聊天模式';
-    modeLabel.textContent = '聊天模式';
-  }
 }
 
 function onChatResult(text) {
@@ -280,24 +240,17 @@ async function onChatEnd(text) {
   transcriptLive.textContent = '';
   if (!text) return;
 
-  const checkRes = await api('/api/unlock', { passphrase: text });
-  if (checkRes.ok) {
-    setMode(true);
-    addMessage('已切換至指令模式 (30秒)', 'bot');
-    speak('指令模式已啟動');
-    return;
-  }
-
   addMessage(text, 'user');
   const typing = addMessage('...', 'bot typing');
   setBtnState(pttBtn, 'waiting');
   statusBar.className = 'status-bar status-waiting';
   statusBar.textContent = '等待回覆...';
 
-  const res = await api('/api/chat', { text, mode: commandMode ? 'command' : 'chat', token });
+  const res = await api('/api/chat', { text, token });
 
   setBtnState(pttBtn, 'idle');
-  setMode(commandMode); // restore status bar
+  statusBar.className = 'status-bar status-chat';
+  statusBar.textContent = '聊天模式';
 
   if (res.error === '請重新解鎖') {
     token = null;
