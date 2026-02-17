@@ -355,7 +355,10 @@ function setupPTT(btn, onResult, onEnd) {
     isRecording = false;
     btn.classList.remove('active');
     if (rec) { try { rec.stop(); } catch {} }
-    onEnd(finalText || lastText);
+    // Delay to let final results come in
+    setTimeout(() => {
+      onEnd(finalText || lastText);
+    }, 500);
   }
 
   btn.addEventListener('mousedown', start);
