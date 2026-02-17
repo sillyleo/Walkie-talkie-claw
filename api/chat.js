@@ -2,18 +2,6 @@ const { verifyToken } = require('./_lib/auth');
 
 const OPENCLAW_URL = process.env.OPENCLAW_GATEWAY_URL; // e.g. https://xxx.trycloudflare.com
 const OPENCLAW_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN;
-const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || '';
-
-// Log user message to Discord via webhook (fire and forget)
-function logUserToDiscord(text) {
-  if (!WEBHOOK_URL) return;
-  fetch(WEBHOOK_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: text, username: 'Leo (對講機)' })
-  }).catch(() => {});
-}
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   
@@ -24,10 +12,6 @@ export default async function handler(req, res) {
   if (!OPENCLAW_URL || !OPENCLAW_TOKEN) {
     return res.json({ reply: '未設定 OpenClaw Gateway 連線' });
   }
-
-  // Log user message
-  const prefix = mode === 'command' ? '🟢 ' : '';
-  logUserToDiscord(prefix + text);
 
   try {
     const r = await fetch(`${OPENCLAW_URL}/v1/chat/completions`, {
