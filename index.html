@@ -316,50 +316,64 @@ function addMessage(text, type) {
   return div;
 }
 
-// --- PTT ---
+// --- PTT (Whisper) ---
 function setupPTT(btn, onResult, onEnd) {
-  let rec = null;
-  let finalText = '';
-  let lastText = '';
+  let mediaRec = null;
+  let chunks = [];
+  let stream = null;
 
-  function start(e) {
+  async function start(e) {
     e.preventDefault();
     if (isRecording) return;
     isRecording = true;
-    finalText = '';
-    lastText = '';
+    chunks = [];
     setBtnState(btn, 'recording');
+    onResult('🎤 錄音中...');
 
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { alert('不支援語音辨識'); return; }
-    rec = new SR();
-    rec.lang = 'zh-TW';
-    rec.interimResults = true;
-    rec.continuous = true;
-    rec.onresult = e2 => {
-      let f = '', interim = '';
-      for (let i = 0; i < e2.results.length; i++) {
-        if (e2.results[i].isFinal) f += e2.results[i][0].transcript;
-        else interim += e2.results[i][0].transcript;
-      }
-      finalText = f;
-      lastText = f || interim;
-      onResult(lastText);
-    };
-    rec.onerror = () => {};
-    rec.onend = () => { if (isRecording) stop(); };
-    rec.start();
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRec = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm' });
+      mediaRec.ondataavailable = e2 => { if (e2.data.size > 0) chunks.push(e2.data); };
+      mediaRec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        if (chunks.length === 0) { onEnd(''); return; }
+        const blob = new Blob(chunks, { type: mediaRec.mimeType || 'audio/webm' });
+        onResult('辨識中...');
+        setBtnState(btn, 'waiting');
+        try {
+          const r = await fetch(API + '/api/transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': blob.type },
+            body: blob
+          });
+          const data = await r.json();
+          const text = (data.text || '').trim();
+          onResult(text || '');
+          setBtnState(btn, 'idle');
+          onEnd(text);
+        } catch (err) {
+          onResult('辨識失敗');
+          setBtnState(btn, 'idle');
+          onEnd('');
+        }
+      };
+      mediaRec.start();
+    } catch (err) {
+      onResult('無法使用麥克風');
+      isRecording = false;
+      setBtnState(btn, 'idle');
+    }
   }
 
   function stop(e) {
     if (e) e.preventDefault();
     if (!isRecording) return;
     isRecording = false;
-    setBtnState(btn, 'idle');
-    if (rec) { try { rec.stop(); } catch {} }
-    setTimeout(() => {
-      onEnd(finalText || lastText);
-    }, 500);
+    if (mediaRec && mediaRec.state !== 'inactive') {
+      mediaRec.stop();
+    } else {
+      setBtnState(btn, 'idle');
+    }
   }
 
   btn.addEventListener('mousedown', start);
