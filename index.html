@@ -73,7 +73,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </div>
 
 <script>
-const API = 'https://64.176.48.181:3847' !== location.origin ? 'http://64.176.48.181:3847' : location.origin;
+const API = location.origin;
 let token = localStorage.getItem('wt_token');
 let tokenTime = parseInt(localStorage.getItem('wt_token_time') || '0');
 let isSetup = false;
