@@ -316,12 +316,14 @@ function addMessage(text, type) {
 function setupPTT(btn, onResult, onEnd) {
   let rec = null;
   let finalText = '';
+  let lastText = '';
 
   function start(e) {
     e.preventDefault();
     if (isRecording) return;
     isRecording = true;
     finalText = '';
+    lastText = '';
     btn.classList.add('active');
 
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -337,11 +339,12 @@ function setupPTT(btn, onResult, onEnd) {
         else interim += e2.results[i][0].transcript;
       }
       finalText = f;
-      onResult(f || interim);
+      lastText = f || interim;
+      onResult(lastText);
     };
     rec.onerror = () => {};
     rec.onend = () => {
-      if (isRecording) stop(); // auto-ended
+      if (isRecording) stop();
     };
     rec.start();
   }
@@ -352,7 +355,7 @@ function setupPTT(btn, onResult, onEnd) {
     isRecording = false;
     btn.classList.remove('active');
     if (rec) { try { rec.stop(); } catch {} }
-    onEnd(finalText);
+    onEnd(finalText || lastText);
   }
 
   btn.addEventListener('mousedown', start);
