@@ -1,37 +1,29 @@
 const { verifyToken } = require('./_lib/auth');
 
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || '';
-const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || '';
-const CHANNEL_ID = '1473259736731226115';
-const BOT_USER_ID = process.env.DISCORD_BOT_USER_ID || '';
+const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || '';
+const DISCORD_CHANNEL_ID = '1473259736731226115';
 
-async function sendWebhook(text, mode) {
-  const prefix = mode === 'command' ? '🟢 [指令] ' : '';
-  const r = await fetch(WEBHOOK_URL + '?wait=true', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: prefix + text, username: 'Leo (對講機)' })
-  });
-  return r.json();
-}
+const SYSTEM_PROMPT = `你是一個語音對講機助手。用簡潔口語回答，像對講機對話一樣。
+回答保持簡短（1-3句），除非用戶要求詳細。繁體中文。輕鬆友善。`;
 
-async function pollReply(afterId, maxWait = 30000) {
-  const start = Date.now();
-  while (Date.now() - start < maxWait) {
-    await new Promise(r => setTimeout(r, 1500));
-    try {
-      const r = await fetch(`https://discord.com/api/v10/channels/${CHANNEL_ID}/messages?after=${afterId}&limit=5`, {
-        headers: { 'Authorization': `Bot ${BOT_TOKEN}` }
-      });
-      const msgs = await r.json();
-      if (Array.isArray(msgs)) {
-        // Find a message from the bot (not webhook)
-        const botMsg = msgs.find(m => m.author && m.author.bot && m.author.id !== '1472078444945735710' && m.webhook_id === undefined);
-        if (botMsg) return botMsg.content;
-      }
-    } catch {}
-  }
-  return null;
+// Log to Discord (fire and forget)
+function logToDiscord(text, asBot = false) {
+  try {
+    if (asBot && DISCORD_BOT_TOKEN) {
+      fetch(`https://discord.com/api/v10/channels/${DISCORD_CHANNEL_ID}/messages`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bot ${DISCORD_BOT_TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: text })
+      }).catch(() => {});
+    } else if (WEBHOOK_URL) {
+      fetch(WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: text, username: 'Leo (對講機)' })
+      }).catch(() => {});
+    }
+  } catch {}
 }
 
 export default async function handler(req, res) {
@@ -41,21 +33,34 @@ export default async function handler(req, res) {
   if (!verifyToken(token)) return res.status(401).json({ error: '請重新解鎖' });
   if (!text) return res.status(400).json({ error: '沒有訊息' });
   
-  if (!WEBHOOK_URL) return res.json({ reply: '未設定 DISCORD_WEBHOOK_URL' });
-  if (!BOT_TOKEN) return res.json({ reply: '未設定 DISCORD_BOT_TOKEN' });
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return res.json({ reply: '未設定 OPENAI_API_KEY' });
+
+  // Log user message to Discord
+  const prefix = mode === 'command' ? '🟢 ' : '';
+  logToDiscord(prefix + text);
+
+  const sys = mode === 'command' 
+    ? SYSTEM_PROMPT + '\n指令模式：用戶已驗證，盡力協助。' 
+    : SYSTEM_PROMPT;
   
   try {
-    // Send user message via webhook
-    const sent = await sendWebhook(text, mode);
-    if (!sent.id) return res.json({ reply: '發送失敗' });
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'system', content: sys }, { role: 'user', content: text }],
+        max_tokens: 300
+      })
+    });
+    const data = await r.json();
+    const reply = data.choices?.[0]?.message?.content || '（無回應）';
     
-    // Poll for bot reply
-    const reply = await pollReply(sent.id);
-    if (reply) {
-      res.json({ reply });
-    } else {
-      res.json({ reply: '（等待超時，請稍後再試）' });
-    }
+    // Log bot reply to Discord
+    logToDiscord('🎙️ ' + reply, true);
+    
+    res.json({ reply });
   } catch (e) {
     res.json({ reply: '錯誤：' + e.message });
   }

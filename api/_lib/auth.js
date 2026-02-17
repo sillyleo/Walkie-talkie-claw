@@ -1,5 +1,4 @@
 const crypto = require('crypto');
-
 const JWT_SECRET = process.env.JWT_SECRET || 'walkie-default';
 
 function hashPassphrase(text) {
