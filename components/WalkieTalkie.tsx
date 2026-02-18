@@ -143,7 +143,7 @@ function MessageBubble({ message }: { message: Message }) {
 interface RotaryDialProps {
   position: DialPosition;
   btnState: BtnState;
-  ttsEnabled: boolean;
+  displayMode: "voice" | "text" | "both";
   ttsModelLabel: string;
   onRotateLeft: () => void;
   onRotateRight: () => void;
@@ -154,7 +154,7 @@ interface RotaryDialProps {
 function RotaryDial({
   position,
   btnState,
-  ttsEnabled,
+  displayMode,
   ttsModelLabel,
   onRotateLeft,
   onRotateRight,
@@ -207,9 +207,11 @@ function RotaryDial({
         ? "●"
         : "PTT"
       : position === -1
-      ? ttsEnabled
+      ? displayMode === "voice"
         ? "🔊"
-        : "🔇"
+        : displayMode === "both"
+        ? "🔊💬"
+        : "💬"
       : ttsModelLabel;
 
   const modeName =
@@ -220,9 +222,11 @@ function RotaryDial({
         ? "處理中"
         : "按住說話"
       : position === -1
-      ? ttsEnabled
-        ? "語音開啟"
-        : "語音關閉"
+      ? displayMode === "voice"
+        ? "語音"
+        : displayMode === "both"
+        ? "語音＋文字"
+        : "文字"
       : "切換模型";
 
   const DIAL_SIZE = 210;
@@ -700,10 +704,12 @@ function ChatScreen({ token }: { token: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [btnState, setBtnState] = useState<BtnState>("idle");
   const [liveText, setLiveText] = useState("");
-  const [ttsEnabled, setTtsEnabled] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem("wt_tts") === "1";
+  // displayMode: "voice" = speaker dots + TTS, "text" = chat bubbles no TTS, "both" = chat bubbles + TTS
+  const [displayMode, setDisplayMode] = useState<"voice" | "text" | "both">(() => {
+    if (typeof window === "undefined") return "voice";
+    return (localStorage.getItem("wt_display_mode") as "voice" | "text" | "both") || "voice";
   });
+  const ttsEnabled = displayMode === "voice" || displayMode === "both";
   const [ttsModelIdx, setTtsModelIdx] = useState(() => {
     if (typeof window === "undefined") return 0;
     const saved = localStorage.getItem("wt_tts_model");
@@ -892,19 +898,22 @@ function ChatScreen({ token }: { token: string }) {
     if (dialPosition === 0) {
       stopRecording();
     } else if (dialPosition === -1) {
-      // Toggle TTS
-      const next = !ttsEnabled;
-      setTtsEnabled(next);
-      localStorage.setItem("wt_tts", next ? "1" : "0");
+      // Cycle display mode: voice → text → both → voice
+      const modes: Array<"voice" | "text" | "both"> = ["voice", "text", "both"];
+      const currentIdx = modes.indexOf(displayMode);
+      const nextMode = modes[(currentIdx + 1) % modes.length];
+      setDisplayMode(nextMode);
+      localStorage.setItem("wt_display_mode", nextMode);
     } else if (dialPosition === 1) {
       // Cycle model
       const nextIdx = (ttsModelIdx + 1) % TTS_MODELS.length;
       setTtsModelIdx(nextIdx);
       localStorage.setItem("wt_tts_model", TTS_MODELS[nextIdx].id);
     }
-  }, [dialPosition, ttsEnabled, ttsModelIdx, stopRecording]);
+  }, [dialPosition, displayMode, ttsModelIdx, stopRecording]);
 
-  const showSpeakerDots = ttsEnabled;
+  const showSpeakerDots = displayMode === "voice";
+  const showChatBubbles = displayMode === "text" || displayMode === "both";
 
   return (
     <div
@@ -977,14 +986,16 @@ function ChatScreen({ token }: { token: string }) {
               textTransform: "uppercase",
             }}
           >
-            {ttsEnabled
-              ? `${TTS_MODELS[ttsModelIdx].label}`
-              : "文字"}
+            {displayMode === "voice"
+              ? `🔊 ${TTS_MODELS[ttsModelIdx].label}`
+              : displayMode === "both"
+              ? `🔊💬 ${TTS_MODELS[ttsModelIdx].label}`
+              : "💬 文字"}
           </div>
         </div>
 
         {/* Main display */}
-        {showSpeakerDots ? (
+        {showSpeakerDots && !showChatBubbles ? (
           <SpeakerDots isPlaying={isPlaying} />
         ) : (
           <div
@@ -1090,7 +1101,7 @@ function ChatScreen({ token }: { token: string }) {
         <RotaryDial
           position={dialPosition}
           btnState={btnState}
-          ttsEnabled={ttsEnabled}
+          displayMode={displayMode}
           ttsModelLabel={TTS_MODELS[ttsModelIdx].label}
           onRotateLeft={handleRotateLeft}
           onRotateRight={handleRotateRight}
