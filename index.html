@@ -68,7 +68,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </head>
 <body>
 
-<div class="status-bar status-locked" id="status-bar">已鎖定</div>
+<!-- status bar removed -->
 
 <div id="lock-screen">
   <div class="title">對講機</div>
@@ -98,7 +98,7 @@ let isSetup = false;
 let isRecording = false;
 
 const $ = id => document.getElementById(id);
-const statusBar = $('status-bar');
+const statusBar = { className:'', textContent:'' }; // removed
 const lockScreen = $('lock-screen');
 const chatScreen = $('chat-screen');
 const lockHint = $('lock-hint');
