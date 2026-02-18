@@ -58,7 +58,7 @@ npm install
 | `OPENCLAW_GATEWAY_URL` | ✅ | OpenClaw Gateway 的公開 URL（如 Cloudflare Tunnel URL） |
 | `OPENCLAW_GATEWAY_TOKEN` | ✅ | OpenClaw Gateway 的認證 Token |
 | `JWT_SECRET` | ✅ | 用於簽署前端 session token 的密鑰（任意字串） |
-| `PASSPHRASE_HASH` | ⚠️ | 通關密語的 SHA-256 hash（首次使用時自動生成，或用下方指令手動產生） |
+| `ACCESS_CODE` | ✅ | 解鎖密碼（明文，你自己設定，如 `mySecret123`） |
 | `GEMINI_API_KEY` | ❌ | Google Gemini API Key（如果要用 Gemini TTS） |
 
 ### 步驟 3：設定 OpenClaw Agent
@@ -137,34 +137,9 @@ vercel deploy --prod
 - Output Directory: `.next`
 - Node.js Version: 18+
 
-### 步驟 6：設定通關密語
+### 步驟 6：完成！
 
-**方法 A：透過網頁設定（推薦）**
-
-1. 確保 Vercel 上**沒有** `PASSPHRASE_HASH` 環境變數
-2. 部署並打開網頁 → 會顯示「首次使用，請設定通關密語」
-3. 輸入你想要的密語並按「設定密語」
-4. 頁面會回傳一個 hash 值
-5. **重要：** 把這個 hash 設為 Vercel 環境變數 `PASSPHRASE_HASH`
-6. 重新部署
-
-**方法 B：用指令手動產生 hash**
-
-```bash
-# 把 YOUR_PASSPHRASE 和 YOUR_JWT_SECRET 換成你的值
-node -e "
-const crypto = require('crypto');
-const passphrase = 'YOUR_PASSPHRASE';
-const salt = process.env.JWT_SECRET || 'YOUR_JWT_SECRET';
-console.log(crypto.createHash('sha256').update(passphrase + salt).digest('hex'));
-"
-```
-
-把輸出的 hash 設為 Vercel 環境變數 `PASSPHRASE_HASH`。
-
-> ⚠️ **注意：** Hash salt 使用 `JWT_SECRET` 環境變數。如果你更改了 `JWT_SECRET`，需要重新產生 `PASSPHRASE_HASH`。
-
-之後每次使用都要輸入密語解鎖（session 有效 4 小時）。
+`ACCESS_CODE` 已經在步驟 2 設定好了。打開網頁，輸入你設定的密碼就能用。Session 有效 4 小時，過期後重新輸入即可。
 
 ## 專案結構
 
@@ -179,9 +154,8 @@ walkie-deploy/
 │       ├── chat/route.ts          # 對話 API → OpenClaw Gateway
 │       ├── transcribe/route.ts    # 語音辨識 API → OpenAI Whisper
 │       ├── tts/route.ts           # 語音合成 API → OpenAI / Gemini
-│       ├── status/route.ts        # 密語狀態檢查
-│       ├── setup-passphrase/route.ts  # 首次設定密語
-│       └── unlock/route.ts        # 密語解鎖
+│       ├── status/route.ts        # 狀態檢查
+│       └── unlock/route.ts        # 密碼解鎖
 ├── components/
 │   ├── WalkieTalkie.tsx           # 主要對講機 UI 組件
 │   └── ui/                        # shadcn/ui 組件
@@ -224,18 +198,13 @@ walkie-deploy/
 - **輸出：** `{ hasPassphrase: true/false }`
 
 ### `POST /api/unlock`
-- **輸入：** `{ passphrase: "密語" }`
-- **輸出：** `{ ok: true, token: "JWT" }` 或 `{ error: "密語錯誤" }`
-
-### `POST /api/setup-passphrase`
-- **輸入：** `{ passphrase: "新密語" }`
-- **輸出：** `{ ok: true, token: "JWT", hash: "sha256-hash" }`
+- **輸入：** `{ passphrase: "密碼" }`
+- **輸出：** `{ ok: true, token: "JWT" }` 或 `{ error: "密碼錯誤" }`
 
 ## 認證機制
 
-1. **通關密語：** 使用 SHA-256 hash + salt 驗證
+1. **ACCESS_CODE：** 環境變數中的明文密碼，直接比對
 2. **Session Token：** JWT-like token（HMAC-SHA256 簽署），4 小時有效
-3. **Salt：** 使用 `JWT_SECRET` 環境變數（fallback: `openclaw-walkie-salt`）
 
 Token 格式：`base64(payload).hmac_signature`
 
@@ -311,11 +280,8 @@ openclaw agents add walkie --gemini-api-key YOUR_KEY
 
 ## 常見問題
 
-### Q: 密語設定後重新部署就失效了？
-A: 因為 `process.env.PASSPHRASE_HASH` 在 serverless 環境中不會持久化。你必須把首次設定時回傳的 hash 值手動加到 Vercel 環境變數 `PASSPHRASE_HASH`，然後重新部署。
-
-### Q: 改了 JWT_SECRET 後密語就不能用了？
-A: 因為密語 hash 的 salt 使用 `JWT_SECRET`。改了 secret 就需要重新產生 `PASSPHRASE_HASH`（刪掉舊的 → 重新部署 → 重新設定密語 → 把新 hash 加回去）。
+### Q: 怎麼改密碼？
+A: 去 Vercel Dashboard 改 `ACCESS_CODE` 環境變數，重新部署即可。
 
 ### Q: 語音辨識不準確？
 A: 預設使用 OpenAI Whisper `whisper-1`，語言設為中文（`zh`）。如果需要其他語言，修改 `/api/transcribe/route.ts` 中的 `language` 參數。

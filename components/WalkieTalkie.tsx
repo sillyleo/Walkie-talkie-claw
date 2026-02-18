@@ -46,16 +46,14 @@ function LockScreen({
   const [passphrase, setPassphrase] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [isSetup, setIsSetup] = useState(false);
-  const [statusLoaded, setStatusLoaded] = useState(false);
+  const [ready, setReady] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch("/api/status")
       .then((r) => r.json())
-      .then((d) => {
-        setIsSetup(!d.hasPassphrase);
-        setStatusLoaded(true);
+      .then(() => {
+        setReady(true);
         setTimeout(() => inputRef.current?.focus(), 100);
       })
       .catch(() => setError("無法連線伺服器"));
@@ -67,15 +65,14 @@ function LockScreen({
     setError("");
 
     try {
-      const endpoint = isSetup ? "/api/setup-passphrase" : "/api/unlock";
-      const res = await apiFetch(endpoint, { passphrase: passphrase.trim() });
+      const res = await apiFetch("/api/unlock", { passphrase: passphrase.trim() });
 
       if (res.ok) {
         localStorage.setItem("wt_token", res.token);
         localStorage.setItem("wt_token_time", String(Date.now()));
         onUnlocked(res.token);
       } else {
-        setError(res.error || "驗證失敗");
+        setError(res.error || "密碼錯誤");
         setPassphrase("");
         inputRef.current?.focus();
       }
@@ -83,7 +80,7 @@ function LockScreen({
       setError("連線失敗");
     }
     setLoading(false);
-  }, [passphrase, loading, isSetup, onUnlocked]);
+  }, [passphrase, loading, onUnlocked]);
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-10 px-8">
@@ -96,11 +93,7 @@ function LockScreen({
           對講機
         </h1>
         <p className="text-muted-foreground text-sm tracking-wide">
-          {!statusLoaded
-            ? "載入中…"
-            : isSetup
-            ? "首次使用，請設定通關密語"
-            : "輸入通關密語解鎖"}
+          {!ready ? "載入中…" : "輸入密碼解鎖"}
         </p>
       </div>
 
@@ -109,18 +102,18 @@ function LockScreen({
         <Input
           ref={inputRef}
           type="password"
-          placeholder={isSetup ? "設定密語" : "密語"}
+          placeholder="密碼"
           value={passphrase}
           onChange={(e) => setPassphrase(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
           className="bg-card border-border text-center text-lg tracking-widest h-12 rounded-xl focus-visible:ring-1 focus-visible:ring-muted-foreground"
           autoComplete="off"
-          disabled={!statusLoaded || loading}
+          disabled={!ready || loading}
         />
 
         <Button
           onClick={submit}
-          disabled={!statusLoaded || loading || !passphrase.trim()}
+          disabled={!ready || loading || !passphrase.trim()}
           className="h-12 rounded-xl tracking-widest text-sm uppercase w-full"
         >
           {loading ? (
@@ -128,7 +121,7 @@ function LockScreen({
           ) : (
             <>
               <Lock className="w-4 h-4" />
-              {isSetup ? "設定密語" : "解鎖"}
+              解鎖
             </>
           )}
         </Button>
