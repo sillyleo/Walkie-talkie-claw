@@ -1,21 +1,11 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { cn } from "@/lib/utils";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Settings2, Volume2, VolumeX, Play, Lock, Radio } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Screen = "lock" | "chat";
 type BtnState = "idle" | "recording" | "waiting";
+type DialPosition = -1 | 0 | 1;
 
 interface Message {
   id: string;
@@ -23,11 +13,45 @@ interface Message {
   role: "user" | "bot";
 }
 
-// ─── Helper ───────────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
+const TTS_MODELS = [
+  { id: "openai/tts-1", label: "TTS-1" },
+  { id: "openai/tts-1-hd", label: "TTS-HD" },
+  { id: "gemini/gemini-2.5-flash", label: "Gemini" },
+];
+
+// Braun T3 colour tokens
+const C = {
+  pageBg: "#dedad5",
+  bodyBg: "#f0eeeb",
+  bodyBorder: "#4a4a4a",
+  dot: "#5a5757",
+  dialFace: "#ebebea",
+  dialBorder: "#b0ada8",
+  triangle: "#3a3a3a",
+  tick: "#888480",
+  centerBtn: "#f5f3f0",
+  centerBorder: "#c0bdb8",
+  centerDot: "#888480",
+  divider: "#d0cdc8",
+  textPrimary: "#3a3a3a",
+  textSecondary: "#8a8480",
+  textMuted: "#aaa8a3",
+  bubbleUser: "#3a3a3a",
+  bubbleUserText: "#f0eeeb",
+  bubbleBot: "#e0ddd8",
+  bubbleBotText: "#3a3a3a",
+  bubbleBotBorder: "#c8c5c0",
+  recordRed: "#ef4444",
+  recordRedBg: "#fee2e2",
+  recordRedBorder: "#ef4444",
+  green: "#22c55e",
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function genId() {
   return Math.random().toString(36).slice(2);
 }
-
 async function apiFetch(path: string, body: Record<string, unknown>) {
   const r = await fetch(path, {
     method: "POST",
@@ -35,6 +59,423 @@ async function apiFetch(path: string, body: Record<string, unknown>) {
     body: JSON.stringify(body),
   });
   return r.json();
+}
+
+// ─── Speaker Dots ─────────────────────────────────────────────────────────────
+function SpeakerDots({ isPlaying }: { isPlaying: boolean }) {
+  const COLS = 12;
+  const ROWS = 10;
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px 18px",
+        minHeight: 0,
+      }}
+    >
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${COLS}, 1fr)`,
+          gap: "7px",
+          width: "100%",
+          maxWidth: "340px",
+        }}
+      >
+        {Array.from({ length: ROWS * COLS }).map((_, i) => {
+          const col = i % COLS;
+          return (
+            <div
+              key={i}
+              style={{
+                aspectRatio: "1",
+                borderRadius: "50%",
+                backgroundColor: C.dot,
+                ...(isPlaying
+                  ? {
+                      animation: "speakerPulse 0.7s ease-in-out infinite",
+                      animationDelay: `${col * 0.045}s`,
+                    }
+                  : {}),
+              }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Message Bubble ───────────────────────────────────────────────────────────
+function MessageBubble({ message }: { message: Message }) {
+  const isUser = message.role === "user";
+  return (
+    <div
+      className="msg-enter"
+      style={{
+        display: "flex",
+        alignSelf: isUser ? "flex-end" : "flex-start",
+        maxWidth: "85%",
+      }}
+    >
+      <div
+        style={{
+          padding: "10px 14px",
+          borderRadius: isUser ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+          fontSize: "14px",
+          lineHeight: "1.55",
+          backgroundColor: isUser ? C.bubbleUser : C.bubbleBot,
+          color: isUser ? C.bubbleUserText : C.bubbleBotText,
+          border: isUser ? "none" : `1px solid ${C.bubbleBotBorder}`,
+          wordBreak: "break-word",
+        }}
+      >
+        {message.text}
+      </div>
+    </div>
+  );
+}
+
+// ─── Rotary Dial ─────────────────────────────────────────────────────────────
+interface RotaryDialProps {
+  position: DialPosition;
+  btnState: BtnState;
+  ttsEnabled: boolean;
+  ttsModelLabel: string;
+  onRotateLeft: () => void;
+  onRotateRight: () => void;
+  onCenterPress: () => void;
+  onCenterRelease: () => void;
+}
+
+function RotaryDial({
+  position,
+  btnState,
+  ttsEnabled,
+  ttsModelLabel,
+  onRotateLeft,
+  onRotateRight,
+  onCenterPress,
+  onCenterRelease,
+}: RotaryDialProps) {
+  const angle = position * 45;
+  const isRecording = btnState === "recording";
+  const isWaiting = btnState === "waiting";
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dragStartX = useRef(0);
+  const isDragging = useRef(false);
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      // Ignore if click is near center button (r < 46px)
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const dx = e.clientX - (rect.left + rect.width / 2);
+      const dy = e.clientY - (rect.top + rect.height / 2);
+      if (Math.sqrt(dx * dx + dy * dy) < 46) return;
+
+      dragStartX.current = e.clientX;
+      isDragging.current = true;
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    []
+  );
+
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!isDragging.current) return;
+      isDragging.current = false;
+      const delta = e.clientX - dragStartX.current;
+      if (delta > 24) onRotateRight();
+      else if (delta < -24) onRotateLeft();
+    },
+    [onRotateLeft, onRotateRight]
+  );
+
+  const handlePointerCancel = useCallback(() => {
+    isDragging.current = false;
+  }, []);
+
+  // Mode display text
+  const modeLabel =
+    position === 0
+      ? isRecording
+        ? "●"
+        : "PTT"
+      : position === -1
+      ? ttsEnabled
+        ? "🔊"
+        : "🔇"
+      : ttsModelLabel;
+
+  const modeName =
+    position === 0
+      ? isRecording
+        ? "聆聽中"
+        : isWaiting
+        ? "處理中"
+        : "按住說話"
+      : position === -1
+      ? ttsEnabled
+        ? "語音開啟"
+        : "語音關閉"
+      : "切換模型";
+
+  const DIAL_SIZE = 210;
+  const FACE_INSET = 5;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "6px",
+      }}
+    >
+      {/* Mode name label */}
+      <div
+        style={{
+          fontSize: "11px",
+          letterSpacing: "0.18em",
+          color: isRecording ? C.recordRed : C.textSecondary,
+          textTransform: "uppercase",
+          fontWeight: 500,
+          height: "16px",
+          display: "flex",
+          alignItems: "center",
+          transition: "color 0.2s",
+        }}
+      >
+        {modeName}
+      </div>
+
+      {/* Dial */}
+      <div
+        ref={containerRef}
+        style={{
+          position: "relative",
+          width: DIAL_SIZE,
+          height: DIAL_SIZE,
+          userSelect: "none",
+          touchAction: "none",
+          cursor: "grab",
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+      >
+        {/* Outer ring */}
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            borderRadius: "50%",
+            border: `1.5px solid ${C.dialBorder}`,
+            pointerEvents: "none",
+          }}
+        />
+
+        {/* Rotating dial face */}
+        <div
+          style={{
+            position: "absolute",
+            inset: FACE_INSET,
+            borderRadius: "50%",
+            backgroundColor: C.dialFace,
+            transform: `rotate(${angle}deg)`,
+            transition:
+              "transform 0.38s cubic-bezier(0.34, 1.56, 0.64, 1)",
+            boxShadow:
+              "inset 0 2px 6px rgba(0,0,0,0.07), inset 0 -1px 3px rgba(255,255,255,0.9)",
+            pointerEvents: "none",
+          }}
+        >
+          {/* Triangle indicator — top of dial face */}
+          <div
+            style={{
+              position: "absolute",
+              top: "14px",
+              left: "50%",
+              transform: "translateX(-50%)",
+              width: 0,
+              height: 0,
+              borderLeft: "5.5px solid transparent",
+              borderRight: "5.5px solid transparent",
+              borderBottom: `9px solid ${C.triangle}`,
+            }}
+          />
+
+          {/* Tick mark — lower-left */}
+          <div
+            style={{
+              position: "absolute",
+              bottom: "21%",
+              left: "16%",
+              width: "22px",
+              height: "2px",
+              backgroundColor: C.tick,
+              borderRadius: "1px",
+              transform: "rotate(40deg)",
+            }}
+          />
+
+          {/* Tick mark — lower-right */}
+          <div
+            style={{
+              position: "absolute",
+              bottom: "21%",
+              right: "16%",
+              width: "22px",
+              height: "2px",
+              backgroundColor: C.tick,
+              borderRadius: "1px",
+              transform: "rotate(-40deg)",
+            }}
+          />
+        </div>
+
+        {/* Left tap zone (click = rotate left) */}
+        <button
+          aria-label="向左旋轉"
+          onClick={onRotateLeft}
+          style={{
+            position: "absolute",
+            left: "8px",
+            top: "50%",
+            transform: "translateY(-50%)",
+            width: "55px",
+            height: "90px",
+            opacity: 0,
+            zIndex: 4,
+            cursor: "pointer",
+          }}
+        />
+
+        {/* Right tap zone (click = rotate right) */}
+        <button
+          aria-label="向右旋轉"
+          onClick={onRotateRight}
+          style={{
+            position: "absolute",
+            right: "8px",
+            top: "50%",
+            transform: "translateY(-50%)",
+            width: "55px",
+            height: "90px",
+            opacity: 0,
+            zIndex: 4,
+            cursor: "pointer",
+          }}
+        />
+
+        {/* Center button — fixed, does NOT rotate */}
+        <div
+          style={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            zIndex: 10,
+          }}
+        >
+          <button
+            onMouseDown={onCenterPress}
+            onMouseUp={onCenterRelease}
+            onMouseLeave={onCenterRelease}
+            onTouchStart={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onCenterPress();
+            }}
+            onTouchEnd={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onCenterRelease();
+            }}
+            onTouchCancel={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onCenterRelease();
+            }}
+            disabled={isWaiting}
+            aria-label="中心按鈕"
+            style={{
+              width: "70px",
+              height: "70px",
+              borderRadius: "50%",
+              backgroundColor: isRecording
+                ? C.recordRedBg
+                : C.centerBtn,
+              border: `1.5px solid ${
+                isRecording ? C.recordRedBorder : C.centerBorder
+              }`,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
+              cursor: isWaiting ? "not-allowed" : "pointer",
+              boxShadow: isRecording
+                ? `0 0 14px rgba(239,68,68,0.35), inset 0 1px 3px rgba(0,0,0,0.12)`
+                : "inset 0 2px 5px rgba(0,0,0,0.09), inset 0 -1px 2px rgba(255,255,255,0.85)",
+              transition: "all 0.15s ease",
+              animation: isRecording
+                ? "centerPulse 1.2s ease-in-out infinite"
+                : "none",
+            }}
+          >
+            <span
+              style={{
+                width: "7px",
+                height: "7px",
+                borderRadius: "50%",
+                backgroundColor: isRecording
+                  ? C.recordRed
+                  : isWaiting
+                  ? "#d4a800"
+                  : C.centerDot,
+                transition: "background-color 0.15s",
+              }}
+            />
+            <span
+              style={{
+                width: "7px",
+                height: "7px",
+                borderRadius: "50%",
+                backgroundColor: isRecording
+                  ? C.recordRed
+                  : isWaiting
+                  ? "#d4a800"
+                  : C.centerDot,
+                transition: "background-color 0.15s",
+              }}
+            />
+          </button>
+        </div>
+      </div>
+
+      {/* Mode value label */}
+      <div
+        style={{
+          fontSize: "16px",
+          color: C.textPrimary,
+          height: "26px",
+          display: "flex",
+          alignItems: "center",
+          letterSpacing: "0.05em",
+          minWidth: "60px",
+          justifyContent: "center",
+        }}
+      >
+        {modeLabel}
+      </div>
+    </div>
+  );
 }
 
 // ─── Lock Screen ─────────────────────────────────────────────────────────────
@@ -56,17 +497,17 @@ function LockScreen({
         setReady(true);
         setTimeout(() => inputRef.current?.focus(), 100);
       })
-      .catch(() => setError("無法連線伺服器"));
+      .catch(() => setError("無法連線"));
   }, []);
 
   const submit = useCallback(async () => {
     if (!passphrase.trim() || loading) return;
     setLoading(true);
     setError("");
-
     try {
-      const res = await apiFetch("/api/unlock", { passphrase: passphrase.trim() });
-
+      const res = await apiFetch("/api/unlock", {
+        passphrase: passphrase.trim(),
+      });
       if (res.ok) {
         localStorage.setItem("wt_token", res.token);
         localStorage.setItem("wt_token_time", String(Date.now()));
@@ -82,230 +523,174 @@ function LockScreen({
     setLoading(false);
   }, [passphrase, loading, onUnlocked]);
 
-  return (
-    <div className="flex flex-col items-center justify-center h-full gap-10 px-8">
-      {/* Logo / title */}
-      <div className="flex flex-col items-center gap-3">
-        <div className="w-16 h-16 rounded-full border border-border flex items-center justify-center">
-          <Radio className="w-7 h-7 text-muted-foreground" />
-        </div>
-        <h1 className="text-2xl font-light tracking-[0.3em] uppercase text-foreground">
-          對講機
-        </h1>
-        <p className="text-muted-foreground text-sm tracking-wide">
-          {!ready ? "載入中…" : "輸入密碼解鎖"}
-        </p>
-      </div>
-
-      {/* Input */}
-      <div className="w-full max-w-xs flex flex-col gap-3">
-        <Input
-          ref={inputRef}
-          type="password"
-          placeholder="密碼"
-          value={passphrase}
-          onChange={(e) => setPassphrase(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-          className="bg-card border-border text-center text-lg tracking-widest h-12 rounded-xl focus-visible:ring-1 focus-visible:ring-muted-foreground"
-          autoComplete="off"
-          disabled={!ready || loading}
-        />
-
-        <Button
-          onClick={submit}
-          disabled={!ready || loading || !passphrase.trim()}
-          className="h-12 rounded-xl tracking-widest text-sm uppercase w-full"
-        >
-          {loading ? (
-            <span className="opacity-60">處理中…</span>
-          ) : (
-            <>
-              <Lock className="w-4 h-4" />
-              解鎖
-            </>
-          )}
-        </Button>
-
-        {error && (
-          <p className="text-center text-sm text-red-400 tracking-wide">
-            {error}
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── PTT Button ───────────────────────────────────────────────────────────────
-function PTTButton({
-  state,
-  onStart,
-  onStop,
-}: {
-  state: BtnState;
-  onStart: () => void;
-  onStop: () => void;
-}) {
-  const isRecording = state === "recording";
-  const isWaiting = state === "waiting";
-
-  return (
-    <Button
-      variant="outline"
-      onMouseDown={onStart}
-      onMouseUp={onStop}
-      onMouseLeave={onStop}
-      onTouchStart={(e) => { e.preventDefault(); onStart(); }}
-      onTouchEnd={(e) => { e.preventDefault(); onStop(); }}
-      onTouchCancel={(e) => { e.preventDefault(); onStop(); }}
-      disabled={isWaiting}
-      aria-label={isRecording ? "錄音中" : isWaiting ? "處理中" : "按住說話"}
-      className={cn(
-        "relative w-44 h-44 rounded-full",
-        "border-2 transition-all duration-150",
-        "flex flex-col items-center justify-center gap-2",
-        "select-none touch-none shadow-none",
-        !isRecording && !isWaiting && [
-          "border-border bg-background",
-          "hover:bg-accent hover:border-foreground/30",
-          "active:scale-[0.97]",
-        ],
-        isRecording && [
-          "border-red-500 bg-red-500/10",
-          "scale-105",
-          "ptt-btn-recording",
-        ],
-        isWaiting && [
-          "border-amber-500/50 bg-amber-500/5",
-          "cursor-not-allowed",
-          "ptt-btn-waiting",
-        ]
-      )}
-    >
-      {/* Center dot indicator */}
-      <div
-        className={cn(
-          "w-4 h-4 rounded-full transition-all duration-150",
-          isRecording && "bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.8)]",
-          isWaiting && "bg-amber-500",
-          !isRecording && !isWaiting && "bg-muted-foreground"
-        )}
-      />
-      <span
-        className={cn(
-          "text-xs font-medium tracking-[0.2em] uppercase transition-colors duration-150",
-          isRecording && "text-red-400",
-          isWaiting && "text-amber-400",
-          !isRecording && !isWaiting && "text-muted-foreground"
-        )}
-      >
-        {isRecording ? "聆聽中" : isWaiting ? "處理中" : "按住說話"}
-      </span>
-    </Button>
-  );
-}
-
-// ─── Message Bubble ───────────────────────────────────────────────────────────
-function MessageBubble({
-  message,
-  onPlay,
-}: {
-  message: Message;
-  onPlay?: (text: string) => void;
-}) {
-  const isUser = message.role === "user";
+  const LOCK_DOT_COLS = 10;
+  const LOCK_DOT_ROWS = 6;
 
   return (
     <div
-      className={cn(
-        "msg-enter flex gap-2 max-w-[85%]",
-        isUser ? "self-end flex-row-reverse" : "self-start"
-      )}
+      style={{
+        backgroundColor: C.bodyBg,
+        borderRadius: "32px",
+        border: `4px solid ${C.bodyBorder}`,
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        overflow: "hidden",
+      }}
     >
+      {/* Speaker dots — decorative top section */}
       <div
-        className={cn(
-          "px-4 py-3 rounded-2xl text-sm leading-relaxed break-words",
-          isUser
-            ? "bg-foreground text-background rounded-br-sm"
-            : "bg-card text-foreground rounded-bl-sm border border-border"
-        )}
+        style={{
+          flex: 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "28px 24px 20px",
+          width: "100%",
+        }}
       >
-        {message.text}
-      </div>
-      {!isUser && onPlay && (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => onPlay(message.text)}
-          className="self-end mb-1 text-muted-foreground hover:text-foreground h-7 w-7"
-          aria-label="播放語音"
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${LOCK_DOT_COLS}, 1fr)`,
+            gap: "8px",
+            width: "100%",
+            maxWidth: "300px",
+            opacity: 0.35,
+          }}
         >
-          <Play className="w-3.5 h-3.5" />
-        </Button>
-      )}
-    </div>
-  );
-}
-
-// ─── Settings Panel ───────────────────────────────────────────────────────────
-function SettingsPanel({
-  ttsModel,
-  ttsVoice,
-  onModelChange,
-  onVoiceChange,
-}: {
-  ttsModel: string;
-  ttsVoice: string;
-  onModelChange: (v: string) => void;
-  onVoiceChange: (v: string) => void;
-}) {
-  const isGemini = ttsModel.startsWith("gemini/");
-
-  return (
-    <div className="border border-border rounded-xl p-4 bg-card space-y-3 text-sm">
-      <p className="text-muted-foreground text-xs uppercase tracking-widest font-medium">
-        語音設定
-      </p>
-
-      <div className="space-y-1">
-        <label className="text-muted-foreground text-xs">
-          模型
-        </label>
-        <Select value={ttsModel} onValueChange={onModelChange}>
-          <SelectTrigger className="bg-input border-border h-9">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="openai/tts-1">OpenAI TTS-1</SelectItem>
-            <SelectItem value="openai/tts-1-hd">OpenAI TTS-1-HD</SelectItem>
-            <SelectItem value="gemini/gemini-2.5-flash">
-              Gemini 2.5 Flash
-            </SelectItem>
-          </SelectContent>
-        </Select>
+          {Array.from({ length: LOCK_DOT_ROWS * LOCK_DOT_COLS }).map(
+            (_, i) => (
+              <div
+                key={i}
+                style={{
+                  aspectRatio: "1",
+                  borderRadius: "50%",
+                  backgroundColor: C.dot,
+                }}
+              />
+            )
+          )}
+        </div>
       </div>
 
-      {!isGemini && (
-        <div className="space-y-1">
-          <label className="text-muted-foreground text-xs">
-            聲音
-          </label>
-          <Select value={ttsVoice} onValueChange={onVoiceChange}>
-            <SelectTrigger className="bg-input border-border h-9">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {["alloy", "echo", "fable", "onyx", "nova", "shimmer"].map(
-                (v) => (
-                  <SelectItem key={v} value={v}>
-                    {v.charAt(0).toUpperCase() + v.slice(1)}
-                  </SelectItem>
-                )
-              )}
-            </SelectContent>
-          </Select>
+      {/* Divider */}
+      <div
+        style={{
+          height: "1px",
+          backgroundColor: C.divider,
+          width: "calc(100% - 48px)",
+        }}
+      />
+
+      {/* Lock control area */}
+      <div
+        style={{
+          flexShrink: 0,
+          padding: "32px 32px 48px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "20px",
+          width: "100%",
+        }}
+      >
+        {/* Status label */}
+        <div
+          style={{
+            fontSize: "11px",
+            letterSpacing: "0.22em",
+            color: C.textMuted,
+            textTransform: "uppercase",
+            fontFamily: "monospace",
+          }}
+        >
+          {!ready ? "初始化…" : "輸入密碼解鎖"}
         </div>
-      )}
+
+        {/* Password field */}
+        <input
+          ref={inputRef}
+          type="password"
+          value={passphrase}
+          onChange={(e) => setPassphrase(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          placeholder="  ·  ·  ·  ·  ·"
+          disabled={!ready || loading}
+          autoComplete="off"
+          style={{
+            width: "100%",
+            maxWidth: "260px",
+            height: "50px",
+            backgroundColor: C.pageBg,
+            border: `1.5px solid ${C.centerBorder}`,
+            borderRadius: "12px",
+            textAlign: "center",
+            fontSize: "22px",
+            letterSpacing: "0.5em",
+            color: C.textPrimary,
+            outline: "none",
+            fontFamily: "monospace",
+          }}
+        />
+
+        {/* Error */}
+        {error && (
+          <div
+            style={{
+              fontSize: "12px",
+              color: C.recordRed,
+              letterSpacing: "0.08em",
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        {/* Unlock button — large circle */}
+        <button
+          onClick={submit}
+          disabled={!ready || loading || !passphrase.trim()}
+          style={{
+            width: "86px",
+            height: "86px",
+            borderRadius: "50%",
+            backgroundColor:
+              passphrase.trim() && ready && !loading
+                ? C.bodyBorder
+                : C.dialBorder,
+            border: "none",
+            color: C.bodyBg,
+            fontSize: "11px",
+            letterSpacing: "0.2em",
+            textTransform: "uppercase",
+            cursor:
+              passphrase.trim() && ready && !loading ? "pointer" : "default",
+            transition: "all 0.2s ease",
+            boxShadow:
+              passphrase.trim() && ready && !loading
+                ? "0 4px 12px rgba(74,74,74,0.3)"
+                : "none",
+            fontFamily:
+              "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif",
+          }}
+        >
+          {loading ? "…" : "解鎖"}
+        </button>
+
+        {/* Branding */}
+        <div
+          style={{
+            fontSize: "10px",
+            letterSpacing: "0.4em",
+            color: C.textMuted,
+            textTransform: "uppercase",
+          }}
+        >
+          walkie
+        </div>
+      </div>
     </div>
   );
 }
@@ -319,15 +704,18 @@ function ChatScreen({ token }: { token: string }) {
     if (typeof window === "undefined") return false;
     return localStorage.getItem("wt_tts") === "1";
   });
-  const [ttsModel, setTtsModel] = useState(() => {
-    if (typeof window === "undefined") return "openai/tts-1";
-    return localStorage.getItem("wt_tts_model") || "openai/tts-1";
+  const [ttsModelIdx, setTtsModelIdx] = useState(() => {
+    if (typeof window === "undefined") return 0;
+    const saved = localStorage.getItem("wt_tts_model");
+    const idx = TTS_MODELS.findIndex((m) => m.id === saved);
+    return idx >= 0 ? idx : 0;
   });
-  const [ttsVoice, setTtsVoice] = useState(() => {
+  const [ttsVoice] = useState(() => {
     if (typeof window === "undefined") return "shimmer";
     return localStorage.getItem("wt_tts_voice") || "shimmer";
   });
-  const [showSettings, setShowSettings] = useState(false);
+  const [dialPosition, setDialPosition] = useState<DialPosition>(0);
+  const [isPlaying, setIsPlaying] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecRef = useRef<MediaRecorder | null>(null);
@@ -335,7 +723,6 @@ function ChatScreen({ token }: { token: string }) {
   const isRecordingRef = useRef(false);
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, liveText]);
@@ -352,31 +739,38 @@ function ChatScreen({ token }: { token: string }) {
         ttsAudioRef.current.pause();
         ttsAudioRef.current = null;
       }
+      setIsPlaying(true);
       try {
+        const model = TTS_MODELS[ttsModelIdx].id;
         const r = await fetch("/api/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, model: ttsModel, voice: ttsVoice }),
+          body: JSON.stringify({ text, model, voice: ttsVoice }),
         });
-        if (!r.ok) return;
+        if (!r.ok) {
+          setIsPlaying(false);
+          return;
+        }
         const blob = await r.blob();
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
         ttsAudioRef.current = audio;
-        audio.play().catch(() => {});
-      } catch {}
+        audio.onended = () => setIsPlaying(false);
+        audio.onerror = () => setIsPlaying(false);
+        audio.play().catch(() => setIsPlaying(false));
+      } catch {
+        setIsPlaying(false);
+      }
     },
-    [ttsModel, ttsVoice]
+    [ttsModelIdx, ttsVoice]
   );
 
   const handleResult = useCallback(
     async (text: string) => {
       setLiveText("");
       if (!text) return;
-
       addMessage(text, "user");
 
-      // Add typing placeholder
       const typingId = genId();
       setMessages((prev) => [
         ...prev,
@@ -386,18 +780,14 @@ function ChatScreen({ token }: { token: string }) {
 
       try {
         const res = await apiFetch("/api/chat", { text, token });
-
         if (res.error === "請重新解鎖") {
           localStorage.removeItem("wt_token");
           window.location.reload();
           return;
         }
-
         const reply = res.reply || res.error || "（無回應）";
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === typingId ? { ...m, text: reply } : m
-          )
+          prev.map((m) => (m.id === typingId ? { ...m, text: reply } : m))
         );
         if (ttsEnabled) playTTS(reply);
       } catch {
@@ -407,7 +797,6 @@ function ChatScreen({ token }: { token: string }) {
           )
         );
       }
-
       setBtnState("idle");
     },
     [token, ttsEnabled, playTTS, addMessage]
@@ -439,11 +828,9 @@ function ChatScreen({ token }: { token: string }) {
           setLiveText("");
           return;
         }
-
         const blob = new Blob(chunksRef.current, { type: rec.mimeType });
         setLiveText("辨識中…");
         setBtnState("waiting");
-
         try {
           const r = await fetch("/api/transcribe", {
             method: "POST",
@@ -472,133 +859,259 @@ function ChatScreen({ token }: { token: string }) {
     if (!isRecordingRef.current) return;
     isRecordingRef.current = false;
     const rec = mediaRecRef.current;
-    if (rec && rec.state !== "inactive") {
-      rec.stop();
-    } else {
-      setBtnState("idle");
-    }
+    if (rec && rec.state !== "inactive") rec.stop();
+    else setBtnState("idle");
     mediaRecRef.current = null;
   }, []);
 
-  const handleTtsToggle = () => {
-    const next = !ttsEnabled;
-    setTtsEnabled(next);
-    localStorage.setItem("wt_tts", next ? "1" : "0");
-  };
+  // Dial interaction
+  const handleRotateLeft = useCallback(() => {
+    setDialPosition((p) => {
+      if (p === 1) return 0;
+      if (p === 0) return -1;
+      return p;
+    });
+  }, []);
 
-  const handleModelChange = (v: string) => {
-    setTtsModel(v);
-    localStorage.setItem("wt_tts_model", v);
-  };
+  const handleRotateRight = useCallback(() => {
+    setDialPosition((p) => {
+      if (p === -1) return 0;
+      if (p === 0) return 1;
+      return p;
+    });
+  }, []);
 
-  const handleVoiceChange = (v: string) => {
-    setTtsVoice(v);
-    localStorage.setItem("wt_tts_voice", v);
-  };
+  const handleCenterPress = useCallback(() => {
+    if (dialPosition === 0 && btnState === "idle") {
+      startRecording();
+    }
+    // TTS and Model modes: action happens on release (like a click)
+  }, [dialPosition, btnState, startRecording]);
+
+  const handleCenterRelease = useCallback(() => {
+    if (dialPosition === 0) {
+      stopRecording();
+    } else if (dialPosition === -1) {
+      // Toggle TTS
+      const next = !ttsEnabled;
+      setTtsEnabled(next);
+      localStorage.setItem("wt_tts", next ? "1" : "0");
+    } else if (dialPosition === 1) {
+      // Cycle model
+      const nextIdx = (ttsModelIdx + 1) % TTS_MODELS.length;
+      setTtsModelIdx(nextIdx);
+      localStorage.setItem("wt_tts_model", TTS_MODELS[nextIdx].id);
+    }
+  }, [dialPosition, ttsEnabled, ttsModelIdx, stopRecording]);
+
+  const showSpeakerDots = ttsEnabled;
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Top bar */}
-      <div className="flex-shrink-0 flex items-center justify-between px-5 py-4 border-b border-border">
-        <div className="flex items-center gap-2.5">
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          <span className="text-xs font-medium tracking-[0.25em] uppercase text-muted-foreground">
-            對講機
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleTtsToggle}
-            className={ttsEnabled ? "text-foreground" : "text-muted-foreground"}
-            aria-label={ttsEnabled ? "關閉語音" : "開啟語音"}
+    <div
+      style={{
+        backgroundColor: C.bodyBg,
+        borderRadius: "32px",
+        border: `4px solid ${C.bodyBorder}`,
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
+      {/* ── Display area (speaker dots OR chat) ────────────────── */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+        }}
+      >
+        {/* Top status bar */}
+        <div
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "16px 20px 8px",
+          }}
+        >
+          {/* Connected indicator */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
           >
-            {ttsEnabled ? (
-              <Volume2 className="w-4 h-4" />
-            ) : (
-              <VolumeX className="w-4 h-4" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setShowSettings((s) => !s)}
-            className={showSettings ? "text-foreground" : "text-muted-foreground"}
-            aria-label="語音設定"
-          >
-            <Settings2 className="w-4 h-4" />
-          </Button>
-        </div>
-      </div>
-
-      {/* Messages */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 flex flex-col gap-2.5">
-        {messages.length === 0 && (
-          <div className="flex-1 flex items-center justify-center">
-            <p className="text-muted-foreground text-sm tracking-wide">
-              按住下方按鈕開始說話
-            </p>
-          </div>
-        )}
-        {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            onPlay={msg.role === "bot" ? playTTS : undefined}
-          />
-        ))}
-        {liveText && btnState !== "waiting" && (
-          <div className="self-end px-4 py-3 rounded-2xl rounded-br-sm text-sm text-muted-foreground italic border border-border bg-card max-w-[85%]">
-            {liveText}
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* PTT area */}
-      <div className="flex-shrink-0 border-t border-border px-5 pt-5 pb-8 flex flex-col items-center gap-5">
-        {/* Settings panel */}
-        {showSettings && (
-          <div className="w-full max-w-xs">
-            <SettingsPanel
-              ttsModel={ttsModel}
-              ttsVoice={ttsVoice}
-              onModelChange={handleModelChange}
-              onVoiceChange={handleVoiceChange}
+            <div
+              style={{
+                width: "6px",
+                height: "6px",
+                borderRadius: "50%",
+                backgroundColor: C.green,
+              }}
             />
+            <span
+              style={{
+                fontSize: "10px",
+                letterSpacing: "0.25em",
+                color: C.textMuted,
+                textTransform: "uppercase",
+                fontWeight: 500,
+              }}
+            >
+              對講機
+            </span>
+          </div>
+
+          {/* TTS / mode indicator */}
+          <div
+            style={{
+              fontSize: "10px",
+              letterSpacing: "0.15em",
+              color: C.textMuted,
+              textTransform: "uppercase",
+            }}
+          >
+            {ttsEnabled
+              ? `${TTS_MODELS[ttsModelIdx].label}`
+              : "文字"}
+          </div>
+        </div>
+
+        {/* Main display */}
+        {showSpeakerDots ? (
+          <SpeakerDots isPlaying={isPlaying} />
+        ) : (
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflowY: "auto",
+              padding: "8px 16px 16px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "10px",
+            }}
+          >
+            {messages.length === 0 && (
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <p
+                  style={{
+                    color: C.textMuted,
+                    fontSize: "13px",
+                    letterSpacing: "0.12em",
+                  }}
+                >
+                  旋轉旋鈕選擇模式
+                </p>
+              </div>
+            )}
+            {messages.map((msg) => (
+              <MessageBubble key={msg.id} message={msg} />
+            ))}
+            {liveText && btnState !== "waiting" && (
+              <div
+                style={{
+                  alignSelf: "flex-end",
+                  padding: "10px 14px",
+                  borderRadius: "16px 16px 4px 16px",
+                  fontSize: "13px",
+                  color: C.textSecondary,
+                  fontStyle: "italic",
+                  border: `1px solid ${C.bubbleBotBorder}`,
+                  backgroundColor: C.pageBg,
+                  maxWidth: "85%",
+                }}
+              >
+                {liveText}
+              </div>
+            )}
+            <div ref={messagesEndRef} />
           </div>
         )}
+      </div>
 
-        {/* Live transcript */}
-        <div className="h-5 flex items-center">
+      {/* Divider */}
+      <div
+        style={{
+          height: "1px",
+          backgroundColor: C.divider,
+          margin: "0 24px",
+          flexShrink: 0,
+        }}
+      />
+
+      {/* ── Control area ────────────────────────────────────────── */}
+      <div
+        style={{
+          flexShrink: 0,
+          padding: "14px 0 28px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "4px",
+        }}
+      >
+        {/* Live text / status */}
+        <div
+          style={{
+            height: "18px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
           {liveText && (
-            <p className="text-xs text-muted-foreground text-center truncate max-w-[240px]">
+            <span
+              style={{
+                fontSize: "11px",
+                color: C.textSecondary,
+                letterSpacing: "0.08em",
+              }}
+            >
               {liveText}
-            </p>
+            </span>
           )}
         </div>
 
-        {/* PTT button */}
-        <PTTButton
-          state={btnState}
-          onStart={startRecording}
-          onStop={stopRecording}
+        {/* Rotary dial */}
+        <RotaryDial
+          position={dialPosition}
+          btnState={btnState}
+          ttsEnabled={ttsEnabled}
+          ttsModelLabel={TTS_MODELS[ttsModelIdx].label}
+          onRotateLeft={handleRotateLeft}
+          onRotateRight={handleRotateRight}
+          onCenterPress={handleCenterPress}
+          onCenterRelease={handleCenterRelease}
         />
       </div>
     </div>
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Root Component ──────────────────────────────────────────────────────────
 export default function WalkieTalkie() {
   const [screen, setScreen] = useState<Screen>("lock");
   const [token, setToken] = useState("");
 
   useEffect(() => {
-    // Check if we have a valid stored token
     const storedToken = localStorage.getItem("wt_token");
-    const storedTime = parseInt(localStorage.getItem("wt_token_time") || "0");
+    const storedTime = parseInt(
+      localStorage.getItem("wt_token_time") || "0"
+    );
     if (storedToken && Date.now() - storedTime < 4 * 60 * 60 * 1000) {
       setToken(storedToken);
       setScreen("chat");
@@ -611,12 +1124,29 @@ export default function WalkieTalkie() {
   }, []);
 
   return (
-    <main className="h-full h-dvh max-w-md mx-auto">
-      {screen === "lock" ? (
-        <LockScreen onUnlocked={handleUnlocked} />
-      ) : (
-        <ChatScreen token={token} />
-      )}
+    <main
+      style={{
+        height: "100dvh",
+        display: "flex",
+        alignItems: "stretch",
+        justifyContent: "center",
+        backgroundColor: C.pageBg,
+        padding: "12px",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: "430px",
+          flex: 1,
+        }}
+      >
+        {screen === "lock" ? (
+          <LockScreen onUnlocked={handleUnlocked} />
+        ) : (
+          <ChatScreen token={token} />
+        )}
+      </div>
     </main>
   );
 }

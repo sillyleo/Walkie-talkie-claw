@@ -4,38 +4,33 @@
 
 @layer base {
   :root {
-    /* Braun dark theme — clean, minimal, purposeful */
-    --background: 0 0% 7%;        /* #111 — near black */
-    --foreground: 0 0% 93%;       /* #eee — near white */
+    /* Braun T3 light theme */
+    --background: 30 10% 88%;       /* #dedad5 warm gray page */
+    --foreground: 0 0% 23%;         /* #3a3a3a dark text */
 
-    --card: 0 0% 10%;             /* #1a1a1a — slightly lighter */
-    --card-foreground: 0 0% 93%;
+    --card: 30 12% 94%;             /* #f0eeeb radio body */
+    --card-foreground: 0 0% 23%;
 
-    --border: 0 0% 16%;           /* #292929 — subtle divider */
-    --input: 0 0% 13%;            /* #222 */
-    --ring: 0 0% 50%;
+    --border: 30 5% 76%;            /* #c0bdb8 */
+    --input: 30 8% 86%;             /* #dedad5 */
+    --ring: 0 0% 55%;
 
-    --primary: 0 0% 93%;          /* White text/elements on dark */
-    --primary-foreground: 0 0% 7%;
+    --primary: 0 0% 29%;            /* #4a4a4a dark buttons */
+    --primary-foreground: 30 12% 94%;
 
-    --secondary: 0 0% 13%;
-    --secondary-foreground: 0 0% 70%;
+    --secondary: 30 8% 88%;
+    --secondary-foreground: 0 0% 29%;
 
-    --muted: 0 0% 13%;
-    --muted-foreground: 0 0% 45%; /* #737373 */
+    --muted: 30 8% 88%;
+    --muted-foreground: 0 0% 54%;   /* #8a8480 */
 
-    --accent: 0 0% 16%;
-    --accent-foreground: 0 0% 93%;
+    --accent: 30 5% 84%;
+    --accent-foreground: 0 0% 23%;
 
-    --destructive: 0 72% 51%;     /* Red for recording */
+    --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
 
     --radius: 0.75rem;
-
-    /* Braun accent colors */
-    --green-signal: 120 65% 45%;  /* Connected indicator */
-    --red-signal: 0 72% 51%;      /* Recording indicator */
-    --amber-signal: 43 96% 56%;   /* Processing indicator */
   }
 }
 
@@ -50,74 +45,85 @@
   html, body {
     height: 100%;
     height: 100dvh;
+    overflow: hidden;
   }
 
   body {
-    @apply bg-background text-foreground;
-    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    background-color: #dedad5;
+    color: #3a3a3a;
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica,
+      Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    overflow: hidden;
     -webkit-user-select: none;
     user-select: none;
   }
 
-  #__next, #root {
+  #__next,
+  #root {
     height: 100%;
     height: 100dvh;
   }
 }
 
-/* PTT Button animations */
-@keyframes pulse-red {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.4), 0 0 20px rgba(220, 38, 38, 0.3); }
-  50% { box-shadow: 0 0 0 16px rgba(220, 38, 38, 0), 0 0 40px rgba(220, 38, 38, 0.1); }
+/* ── Speaker dot animation ─────────────────────────────────── */
+@keyframes speakerPulse {
+  0%, 100% {
+    transform: scale(0.65);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1.0);
+    opacity: 0.95;
+  }
 }
 
-@keyframes pulse-amber {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+/* ── Center button pulse when recording ───────────────────── */
+@keyframes centerPulse {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.25),
+                inset 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(239, 68, 68, 0.55),
+                inset 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
 }
 
+/* ── Message slide-up ─────────────────────────────────────── */
 @keyframes slide-up {
-  from { transform: translateY(20px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.ptt-btn-recording {
-  animation: pulse-red 1.2s ease-in-out infinite;
-}
-
-.ptt-btn-waiting {
-  animation: pulse-amber 1.5s ease-in-out infinite;
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 .msg-enter {
-  animation: slide-up 0.25s ease-out forwards;
+  animation: slide-up 0.22s ease-out forwards;
 }
 
-/* Scrollbar styling — minimal */
+/* ── Minimal scrollbar ────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 4px;
+  width: 3px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--border));
+  background: #c0bdb8;
   border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground));
+  background: #8a8480;
 }
 
-/* Touch optimization */
-button, [role="button"] {
+/* ── Touch optimisation ───────────────────────────────────── */
+button,
+[role="button"] {
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }

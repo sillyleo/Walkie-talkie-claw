@@ -17,7 +17,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: "#111111",
+  themeColor: "#dedad5",
 };
 
 export default function RootLayout({
