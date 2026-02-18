@@ -5,7 +5,7 @@ const JWT_SECRET = process.env.JWT_SECRET || "walkie-default";
 export function hashPassphrase(text: string): string {
   return crypto
     .createHash("sha256")
-    .update(text.trim() + "openclaw-walkie-salt")
+    .update(text.trim() + (process.env.JWT_SECRET || "openclaw-walkie-salt"))
     .digest("hex");
 }
 
