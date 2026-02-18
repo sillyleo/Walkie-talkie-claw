@@ -88,13 +88,13 @@ function LockScreen({
     <div className="flex flex-col items-center justify-center h-full gap-10 px-8">
       {/* Logo / title */}
       <div className="flex flex-col items-center gap-3">
-        <div className="w-16 h-16 rounded-full border border-[hsl(var(--border))] flex items-center justify-center">
-          <Radio className="w-7 h-7 text-[hsl(var(--muted-foreground))]" />
+        <div className="w-16 h-16 rounded-full border border-border flex items-center justify-center">
+          <Radio className="w-7 h-7 text-muted-foreground" />
         </div>
         <h1 className="text-2xl font-light tracking-[0.3em] uppercase text-foreground">
           對講機
         </h1>
-        <p className="text-[hsl(var(--muted-foreground))] text-sm tracking-wide">
+        <p className="text-muted-foreground text-sm tracking-wide">
           {!statusLoaded
             ? "載入中…"
             : isSetup
@@ -112,7 +112,7 @@ function LockScreen({
           value={passphrase}
           onChange={(e) => setPassphrase(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
-          className="bg-[hsl(var(--card))] border-[hsl(var(--border))] text-center text-lg tracking-widest h-12 rounded-xl focus-visible:ring-1 focus-visible:ring-[hsl(var(--muted-foreground))]"
+          className="bg-card border-border text-center text-lg tracking-widest h-12 rounded-xl focus-visible:ring-1 focus-visible:ring-muted-foreground"
           autoComplete="off"
           disabled={!statusLoaded || loading}
         />
@@ -180,7 +180,7 @@ function PTTButton({
         "focus:outline-none",
         // Idle state
         !isRecording && !isWaiting && [
-          "border-[hsl(var(--border))]",
+          "border-border",
           "bg-transparent",
           "hover:border-foreground/30",
           "active:scale-[0.97]",
@@ -207,7 +207,7 @@ function PTTButton({
           "w-4 h-4 rounded-full transition-all duration-150",
           isRecording && "bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.8)]",
           isWaiting && "bg-amber-500",
-          !isRecording && !isWaiting && "bg-[hsl(var(--muted-foreground))]"
+          !isRecording && !isWaiting && "bg-muted-foreground"
         )}
       />
       <span
@@ -215,7 +215,7 @@ function PTTButton({
           "text-xs font-medium tracking-[0.2em] uppercase transition-colors duration-150",
           isRecording && "text-red-400",
           isWaiting && "text-amber-400",
-          !isRecording && !isWaiting && "text-[hsl(var(--muted-foreground))]"
+          !isRecording && !isWaiting && "text-muted-foreground"
         )}
       >
         {isRecording ? "聆聽中" : isWaiting ? "處理中" : "按住說話"}
@@ -246,7 +246,7 @@ function MessageBubble({
           "px-4 py-3 rounded-2xl text-sm leading-relaxed break-words",
           isUser
             ? "bg-foreground text-background rounded-br-sm"
-            : "bg-[hsl(var(--card))] text-foreground rounded-bl-sm border border-[hsl(var(--border))]"
+            : "bg-card text-foreground rounded-bl-sm border border-border"
         )}
       >
         {message.text}
@@ -254,7 +254,7 @@ function MessageBubble({
       {!isUser && onPlay && (
         <button
           onClick={() => onPlay(message.text)}
-          className="self-end mb-1 text-[hsl(var(--muted-foreground))] hover:text-foreground transition-colors p-1"
+          className="self-end mb-1 text-muted-foreground hover:text-foreground transition-colors p-1"
           aria-label="播放語音"
         >
           <Play className="w-3.5 h-3.5" />
@@ -279,17 +279,17 @@ function SettingsPanel({
   const isGemini = ttsModel.startsWith("gemini/");
 
   return (
-    <div className="border border-[hsl(var(--border))] rounded-xl p-4 bg-[hsl(var(--card))] space-y-3 text-sm">
-      <p className="text-[hsl(var(--muted-foreground))] text-xs uppercase tracking-widest font-medium">
+    <div className="border border-border rounded-xl p-4 bg-card space-y-3 text-sm">
+      <p className="text-muted-foreground text-xs uppercase tracking-widest font-medium">
         語音設定
       </p>
 
       <div className="space-y-1">
-        <label className="text-[hsl(var(--muted-foreground))] text-xs">
+        <label className="text-muted-foreground text-xs">
           模型
         </label>
         <Select value={ttsModel} onValueChange={onModelChange}>
-          <SelectTrigger className="bg-[hsl(var(--input))] border-[hsl(var(--border))] h-9">
+          <SelectTrigger className="bg-input border-border h-9">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -304,11 +304,11 @@ function SettingsPanel({
 
       {!isGemini && (
         <div className="space-y-1">
-          <label className="text-[hsl(var(--muted-foreground))] text-xs">
+          <label className="text-muted-foreground text-xs">
             聲音
           </label>
           <Select value={ttsVoice} onValueChange={onVoiceChange}>
-            <SelectTrigger className="bg-[hsl(var(--input))] border-[hsl(var(--border))] h-9">
+            <SelectTrigger className="bg-input border-border h-9">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -516,10 +516,10 @@ function ChatScreen({ token }: { token: string }) {
   return (
     <div className="flex flex-col h-full">
       {/* Top bar */}
-      <div className="flex-shrink-0 flex items-center justify-between px-5 py-4 border-b border-[hsl(var(--border))]">
+      <div className="flex-shrink-0 flex items-center justify-between px-5 py-4 border-b border-border">
         <div className="flex items-center gap-2.5">
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          <span className="text-xs font-medium tracking-[0.25em] uppercase text-[hsl(var(--muted-foreground))]">
+          <span className="text-xs font-medium tracking-[0.25em] uppercase text-muted-foreground">
             對講機
           </span>
         </div>
@@ -530,7 +530,7 @@ function ChatScreen({ token }: { token: string }) {
               "p-2 rounded-lg transition-colors",
               ttsEnabled
                 ? "text-foreground"
-                : "text-[hsl(var(--muted-foreground))]"
+                : "text-muted-foreground"
             )}
             aria-label={ttsEnabled ? "關閉語音" : "開啟語音"}
           >
@@ -546,7 +546,7 @@ function ChatScreen({ token }: { token: string }) {
               "p-2 rounded-lg transition-colors",
               showSettings
                 ? "text-foreground"
-                : "text-[hsl(var(--muted-foreground))]"
+                : "text-muted-foreground"
             )}
             aria-label="語音設定"
           >
@@ -559,7 +559,7 @@ function ChatScreen({ token }: { token: string }) {
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 flex flex-col gap-2.5">
         {messages.length === 0 && (
           <div className="flex-1 flex items-center justify-center">
-            <p className="text-[hsl(var(--muted-foreground))] text-sm tracking-wide">
+            <p className="text-muted-foreground text-sm tracking-wide">
               按住下方按鈕開始說話
             </p>
           </div>
@@ -572,7 +572,7 @@ function ChatScreen({ token }: { token: string }) {
           />
         ))}
         {liveText && btnState !== "waiting" && (
-          <div className="self-end px-4 py-3 rounded-2xl rounded-br-sm text-sm text-[hsl(var(--muted-foreground))] italic border border-[hsl(var(--border))] bg-[hsl(var(--card))] max-w-[85%]">
+          <div className="self-end px-4 py-3 rounded-2xl rounded-br-sm text-sm text-muted-foreground italic border border-border bg-card max-w-[85%]">
             {liveText}
           </div>
         )}
@@ -580,7 +580,7 @@ function ChatScreen({ token }: { token: string }) {
       </div>
 
       {/* PTT area */}
-      <div className="flex-shrink-0 border-t border-[hsl(var(--border))] px-5 pt-5 pb-8 flex flex-col items-center gap-5">
+      <div className="flex-shrink-0 border-t border-border px-5 pt-5 pb-8 flex flex-col items-center gap-5">
         {/* Settings panel */}
         {showSettings && (
           <div className="w-full max-w-xs">
@@ -596,7 +596,7 @@ function ChatScreen({ token }: { token: string }) {
         {/* Live transcript */}
         <div className="h-5 flex items-center">
           {liveText && (
-            <p className="text-xs text-[hsl(var(--muted-foreground))] text-center truncate max-w-[240px]">
+            <p className="text-xs text-muted-foreground text-center truncate max-w-[240px]">
               {liveText}
             </p>
           )}
