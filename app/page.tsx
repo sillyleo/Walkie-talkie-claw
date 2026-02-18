@@ -1,5 +1,5 @@
-import WalkieTalkie from "@/components/WalkieTalkie";
+import WalkieApp from "@/components/walkie/WalkieApp";
 
 export default function Home() {
-  return <WalkieTalkie />;
+  return <WalkieApp />;
 }
