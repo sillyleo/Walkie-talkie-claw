@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Settings2, Volume2, VolumeX, Play, Lock, Radio } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -117,16 +118,10 @@ function LockScreen({
           disabled={!statusLoaded || loading}
         />
 
-        <button
+        <Button
           onClick={submit}
           disabled={!statusLoaded || loading || !passphrase.trim()}
-          className={cn(
-            "h-12 rounded-xl font-medium tracking-widest text-sm uppercase transition-all duration-200",
-            "bg-foreground text-background",
-            "hover:opacity-90 active:scale-[0.98]",
-            "disabled:opacity-30 disabled:cursor-not-allowed",
-            "flex items-center justify-center gap-2"
-          )}
+          className="h-12 rounded-xl tracking-widest text-sm uppercase w-full"
         >
           {loading ? (
             <span className="opacity-60">處理中…</span>
@@ -136,7 +131,7 @@ function LockScreen({
               {isSetup ? "設定密語" : "解鎖"}
             </>
           )}
-        </button>
+        </Button>
 
         {error && (
           <p className="text-center text-sm text-red-400 tracking-wide">
@@ -162,7 +157,8 @@ function PTTButton({
   const isWaiting = state === "waiting";
 
   return (
-    <button
+    <Button
+      variant="outline"
       onMouseDown={onStart}
       onMouseUp={onStop}
       onMouseLeave={onStop}
@@ -172,30 +168,22 @@ function PTTButton({
       disabled={isWaiting}
       aria-label={isRecording ? "錄音中" : isWaiting ? "處理中" : "按住說話"}
       className={cn(
-        // Base — Braun-style large circle
         "relative w-44 h-44 rounded-full",
         "border-2 transition-all duration-150",
         "flex flex-col items-center justify-center gap-2",
-        "select-none touch-none",
-        "focus:outline-none",
-        // Idle state
+        "select-none touch-none shadow-none",
         !isRecording && !isWaiting && [
-          "border-border",
-          "bg-transparent",
-          "hover:border-foreground/30",
+          "border-border bg-background",
+          "hover:bg-accent hover:border-foreground/30",
           "active:scale-[0.97]",
         ],
-        // Recording state
         isRecording && [
-          "border-red-500",
-          "bg-red-500/10",
+          "border-red-500 bg-red-500/10",
           "scale-105",
           "ptt-btn-recording",
         ],
-        // Waiting state
         isWaiting && [
-          "border-amber-500/50",
-          "bg-amber-500/5",
+          "border-amber-500/50 bg-amber-500/5",
           "cursor-not-allowed",
           "ptt-btn-waiting",
         ]
@@ -220,7 +208,7 @@ function PTTButton({
       >
         {isRecording ? "聆聽中" : isWaiting ? "處理中" : "按住說話"}
       </span>
-    </button>
+    </Button>
   );
 }
 
@@ -252,13 +240,15 @@ function MessageBubble({
         {message.text}
       </div>
       {!isUser && onPlay && (
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={() => onPlay(message.text)}
-          className="self-end mb-1 text-muted-foreground hover:text-foreground transition-colors p-1"
+          className="self-end mb-1 text-muted-foreground hover:text-foreground h-7 w-7"
           aria-label="播放語音"
         >
           <Play className="w-3.5 h-3.5" />
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -524,14 +514,11 @@ function ChatScreen({ token }: { token: string }) {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={handleTtsToggle}
-            className={cn(
-              "p-2 rounded-lg transition-colors",
-              ttsEnabled
-                ? "text-foreground"
-                : "text-muted-foreground"
-            )}
+            className={ttsEnabled ? "text-foreground" : "text-muted-foreground"}
             aria-label={ttsEnabled ? "關閉語音" : "開啟語音"}
           >
             {ttsEnabled ? (
@@ -539,19 +526,16 @@ function ChatScreen({ token }: { token: string }) {
             ) : (
               <VolumeX className="w-4 h-4" />
             )}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => setShowSettings((s) => !s)}
-            className={cn(
-              "p-2 rounded-lg transition-colors",
-              showSettings
-                ? "text-foreground"
-                : "text-muted-foreground"
-            )}
+            className={showSettings ? "text-foreground" : "text-muted-foreground"}
             aria-label="語音設定"
           >
             <Settings2 className="w-4 h-4" />
-          </button>
+          </Button>
         </div>
       </div>
 
