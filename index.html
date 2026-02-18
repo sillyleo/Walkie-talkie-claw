@@ -86,7 +86,31 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <div id="transcript-live">&nbsp;</div>
     <button class="big-btn" id="ptt-btn">按住說話</button>
     <!-- mode label removed -->
-    <button id="tts-toggle" style="background:none;border:1px solid #333;color:#666;padding:6px 14px;border-radius:8px;font-size:0.8em;cursor:pointer;margin-top:4px" onclick="ttsEnabled=!ttsEnabled;localStorage.setItem('wt_tts',ttsEnabled?'1':'0');this.textContent=ttsEnabled?'🔊 語音開':'🔇 語音關';this.style.color=ttsEnabled?'#4f4':'#666'">🔇 語音關</button>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
+      <button id="tts-toggle" style="background:none;border:1px solid #333;color:#666;padding:6px 14px;border-radius:8px;font-size:0.8em;cursor:pointer" onclick="ttsEnabled=!ttsEnabled;localStorage.setItem('wt_tts',ttsEnabled?'1':'0');this.textContent=ttsEnabled?'🔊 語音開':'🔇 語音關';this.style.color=ttsEnabled?'#4f4':'#666'">🔇 語音關</button>
+      <button id="voice-settings-btn" style="background:none;border:1px solid #333;color:#666;padding:6px 14px;border-radius:8px;font-size:0.8em;cursor:pointer" onclick="toggleVoiceSettings()">⚙️ 語音設定</button>
+    </div>
+    <div id="voice-settings" style="display:none;background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:14px;margin-top:8px;width:100%;max-width:320px">
+      <div style="margin-bottom:10px">
+        <label style="font-size:0.8em;color:#888;display:block;margin-bottom:4px">語音模型</label>
+        <select id="tts-model" style="width:100%;padding:8px;border-radius:8px;border:1px solid #333;background:#222;color:#eee;font-size:0.9em" onchange="saveTTSSettings()">
+          <option value="openai/tts-1">OpenAI TTS-1</option>
+          <option value="openai/tts-1-hd">OpenAI TTS-1-HD</option>
+          <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
+        </select>
+      </div>
+      <div id="voice-select-wrap">
+        <label style="font-size:0.8em;color:#888;display:block;margin-bottom:4px">聲音</label>
+        <select id="tts-voice" style="width:100%;padding:8px;border-radius:8px;border:1px solid #333;background:#222;color:#eee;font-size:0.9em" onchange="saveTTSSettings()">
+          <option value="alloy">Alloy</option>
+          <option value="echo">Echo</option>
+          <option value="fable">Fable</option>
+          <option value="onyx">Onyx</option>
+          <option value="nova">Nova</option>
+          <option value="shimmer" selected>Shimmer</option>
+        </select>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -112,6 +136,9 @@ const transcriptLive = $('transcript-live');
 
 let ttsEnabled = localStorage.getItem('wt_tts') === '1';
 let ttsAudio = null;
+let ttsModel = localStorage.getItem('wt_tts_model') || 'openai/tts-1';
+let ttsVoice = localStorage.getItem('wt_tts_voice') || 'shimmer';
+
 function speak(text) {
   if (!ttsEnabled) return;
   playTTS(text);
@@ -122,7 +149,7 @@ async function playTTS(text) {
     const r = await fetch(API + '/api/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text })
+      body: JSON.stringify({ text, model: ttsModel, voice: ttsVoice })
     });
     if (!r.ok) return;
     const blob = await r.blob();
@@ -130,6 +157,28 @@ async function playTTS(text) {
     ttsAudio = new Audio(url);
     ttsAudio.play();
   } catch {}
+}
+function toggleVoiceSettings() {
+  const el = $('voice-settings');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+function saveTTSSettings() {
+  ttsModel = $('tts-model').value;
+  ttsVoice = $('tts-voice').value;
+  localStorage.setItem('wt_tts_model', ttsModel);
+  localStorage.setItem('wt_tts_voice', ttsVoice);
+  // Hide voice selector for Gemini (uses its own voices)
+  const isGemini = ttsModel.startsWith('gemini/');
+  $('voice-select-wrap').style.display = isGemini ? 'none' : 'block';
+}
+function initTTSSettings() {
+  $('tts-model').value = ttsModel;
+  $('tts-voice').value = ttsVoice;
+  const isGemini = ttsModel.startsWith('gemini/');
+  $('voice-select-wrap').style.display = isGemini ? 'none' : 'block';
+  // Init TTS toggle button
+  const ttsBtn = $('tts-toggle');
+  if (ttsEnabled) { ttsBtn.textContent = '🔊 語音開'; ttsBtn.style.color = '#4f4'; }
 }
 
 function isSessionValid() {
@@ -350,6 +399,7 @@ function setupPTT(btn, onResult, onEnd) {
   btn.addEventListener('touchcancel', stop);
 }
 
+initTTSSettings();
 initLock();
 </script>
 </body>
