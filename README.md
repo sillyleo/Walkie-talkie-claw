@@ -58,7 +58,7 @@ npm install
 | `OPENCLAW_GATEWAY_URL` | ✅ | OpenClaw Gateway 的公開 URL（如 Cloudflare Tunnel URL） |
 | `OPENCLAW_GATEWAY_TOKEN` | ✅ | OpenClaw Gateway 的認證 Token |
 | `JWT_SECRET` | ✅ | 用於簽署前端 session token 的密鑰（任意字串） |
-| `PASSPHRASE_HASH` | ⚠️ | 通關密語的 SHA-256 hash（首次使用時會自動生成，見下方說明） |
+| `PASSPHRASE_HASH` | ⚠️ | 通關密語的 SHA-256 hash（首次使用時自動生成，或用下方指令手動產生） |
 | `GEMINI_API_KEY` | ❌ | Google Gemini API Key（如果要用 Gemini TTS） |
 
 ### 步驟 3：設定 OpenClaw Agent
@@ -139,13 +139,30 @@ vercel deploy --prod
 
 ### 步驟 6：設定通關密語
 
-首次訪問網頁時會要求設定通關密語：
+**方法 A：透過網頁設定（推薦）**
 
-1. 打開部署好的 URL
-2. 輸入你想要的密語並按「設定密語」
-3. 頁面會回傳一個 hash 值
-4. **重要：** 把這個 hash 設為 Vercel 環境變數 `PASSPHRASE_HASH`
-5. 重新部署
+1. 確保 Vercel 上**沒有** `PASSPHRASE_HASH` 環境變數
+2. 部署並打開網頁 → 會顯示「首次使用，請設定通關密語」
+3. 輸入你想要的密語並按「設定密語」
+4. 頁面會回傳一個 hash 值
+5. **重要：** 把這個 hash 設為 Vercel 環境變數 `PASSPHRASE_HASH`
+6. 重新部署
+
+**方法 B：用指令手動產生 hash**
+
+```bash
+# 把 YOUR_PASSPHRASE 和 YOUR_JWT_SECRET 換成你的值
+node -e "
+const crypto = require('crypto');
+const passphrase = 'YOUR_PASSPHRASE';
+const salt = process.env.JWT_SECRET || 'YOUR_JWT_SECRET';
+console.log(crypto.createHash('sha256').update(passphrase + salt).digest('hex'));
+"
+```
+
+把輸出的 hash 設為 Vercel 環境變數 `PASSPHRASE_HASH`。
+
+> ⚠️ **注意：** Hash salt 使用 `JWT_SECRET` 環境變數。如果你更改了 `JWT_SECRET`，需要重新產生 `PASSPHRASE_HASH`。
 
 之後每次使用都要輸入密語解鎖（session 有效 4 小時）。
 
@@ -218,7 +235,7 @@ walkie-deploy/
 
 1. **通關密語：** 使用 SHA-256 hash + salt 驗證
 2. **Session Token：** JWT-like token（HMAC-SHA256 簽署），4 小時有效
-3. **Salt：** `openclaw-walkie-salt`（寫死在 `lib/auth.ts`）
+3. **Salt：** 使用 `JWT_SECRET` 環境變數（fallback: `openclaw-walkie-salt`）
 
 Token 格式：`base64(payload).hmac_signature`
 
@@ -296,6 +313,9 @@ openclaw agents add walkie --gemini-api-key YOUR_KEY
 
 ### Q: 密語設定後重新部署就失效了？
 A: 因為 `process.env.PASSPHRASE_HASH` 在 serverless 環境中不會持久化。你必須把首次設定時回傳的 hash 值手動加到 Vercel 環境變數 `PASSPHRASE_HASH`，然後重新部署。
+
+### Q: 改了 JWT_SECRET 後密語就不能用了？
+A: 因為密語 hash 的 salt 使用 `JWT_SECRET`。改了 secret 就需要重新產生 `PASSPHRASE_HASH`（刪掉舊的 → 重新部署 → 重新設定密語 → 把新 hash 加回去）。
 
 ### Q: 語音辨識不準確？
 A: 預設使用 OpenAI Whisper `whisper-1`，語言設為中文（`zh`）。如果需要其他語言，修改 `/api/transcribe/route.ts` 中的 `language` 參數。
